@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# mifaser  R1.trim.fq.gz  R2.trim.fq.gz  GSPLUS.db  ENZYME_ABUND.tsv
+# Annotates reads to EC numbers with the Gold-Standard-Plus database and
+# writes a two-column (EC, read_count) table for this sample.
+set -euo pipefail
+R1="$1"; R2="$2"; DB="$3"; OUT="$4"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+mifaser -f -1 "$R1" -2 "$R2" -d "$DB" -o "$TMP/mif" -c "${PEGASUS_CORES:-8}"
+# mifaser writes analysis.tsv with EC \t count
+cp "$TMP/mif/analysis.tsv" "$OUT"
+echo "[mifaser] wrote $OUT"

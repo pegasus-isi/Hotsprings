@@ -1,0 +1,43 @@
+#!/usr/bin/env Rscript
+# carbon_flux  CELL_COUNTS.csv  GEOCHEM.csv  FLUX_PARAMS.yml  FLUX.tsv
+# Integrates cells above the 122C isotherm (Magnabosco power-law with depth)
+# and applies the paper's carbon-flux equations (residence time, biomass C,
+# fraction of mantle input sequestered).
+suppressMessages({library(yaml)})
+a <- commandArgs(trailingOnly=TRUE)
+cells_f <- a[1]; geo_f <- a[2]; par_f <- a[3]; out <- a[4]
+P <- yaml::read_yaml(par_f)
+
+# --- cell integration (Magnabosco et al. arc-crust power law) ---
+# log10(cells cm^-3) = A + B*log10(depth[m]);  A.m adds +6 for cm^-3 -> m^-3
+A.m <- P$A + 6; B <- P$B
+calc_c_col <- function(z.iso) 10^A.m * z.iso^(B+1) / (B+1)   # analytic column integral
+z.iso <- P$isotherm_depth_m      # depth of 122C isotherm (m), Harris & Wang 2010
+y.m   <- P$along_trench_m         # along-trench width of integration box (m)
+x.m   <- P$trench_to_arc_m        # trench-to-arc distance (m)
+# linear taper of habitable depth from z.iso (coast) to 0 (arc)
+grid  <- seq(0, x.m, by=1000)
+z_at  <- z.iso * (1 - grid/x.m)
+c.col <- sapply(z_at, function(z) if (z>0) calc_c_col(z) else 0)
+n.cells <- sum(c.col * 1000 * y.m, na.rm=TRUE)   # cells per 1km slice x width
+
+# --- biomass carbon and flux (Eqs 1-4) ---
+C.cells   <- P$C_per_cell_gC        # gC per cell (23 fgC = 23e-15)
+f.auto    <- P$f_autotroph          # fraction autotrophs (0.30)
+f.attach  <- P$f_attached           # attached-cell multiplier (100-1000)
+t2        <- P$turnover_yr          # population turnover time (yr)
+C.mantle  <- P$C_mantle_molC_yr     # mantle C flux (6.3e10 molC/yr)
+gC_per_mol <- 12.011
+
+C.biomass_gC  <- n.cells * C.cells * f.attach
+C.biomass_mol <- C.biomass_gC / gC_per_mol
+flux_molC_yr  <- C.biomass_mol * f.auto / t2
+pct_of_mantle <- 100 * flux_molC_yr / C.mantle
+
+res <- data.frame(
+  quantity=c("cells_integrated","biomass_C_molC","biomass_flux_molC_yr",
+             "pct_of_mantle_input"),
+  value=c(n.cells, C.biomass_mol, flux_molC_yr, pct_of_mantle))
+write.table(res, out, sep="\t", row.names=FALSE, quote=FALSE)
+cat(sprintf("[carbon_flux] biomass C = %.2e mol | %.1f%% of mantle input\n",
+            C.biomass_mol, pct_of_mantle))

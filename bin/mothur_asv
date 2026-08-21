@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# mothur_asv  clean1.fasta [clean2.fasta ...]  SILVA.db  ASV_TABLE.tsv  TAXONOMY.tsv
+# Pools per-sample cleaned FASTAs, infers ASVs, classifies against SILVA v132.
+# Follows the mothur MiSeq SOP (ASV mode, pre.cluster diffs=0). Site-specific
+# primer/region trimming should already have happened in qc_16s.
+set -euo pipefail
+args=("$@")
+n=${#args[@]}
+TAX="${args[$((n-1))]}"
+ASV="${args[$((n-2))]}"
+SILVA="${args[$((n-3))]}"
+FASTAS=("${args[@]:0:$((n-3))}")
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# label each sequence with its sample name -> mothur group file
+: > "$TMP/all.fasta"; : > "$TMP/all.groups"
+for f in "${FASTAS[@]}"; do
+  s="$(basename "$f")"; s="${s%%_16S_clean.fasta}"
+  awk -v S="$s" '/^>/{print $0"|"S; next}{print}' "$f" >> "$TMP/all.fasta"
+  grep '^>' "$f" | sed "s/^>//; s/\$/\t$s/" >> "$TMP/all.groups"
+done
+
+mothur "#set.dir(output=$TMP);
+        unique.seqs(fasta=$TMP/all.fasta);
+        count.seqs(name=current, group=$TMP/all.groups);
+        pre.cluster(fasta=current, count=current, diffs=0);
+        classify.seqs(fasta=current, count=current, reference=$SILVA, taxonomy=${SILVA%.db}.tax);
+        make.shared(count=current, label=ASV);
+        get.oturep(count=current, fasta=current, label=ASV)"
+
+# post-process mothur outputs into tidy TSVs (shared -> ASV table, cons.tax -> taxonomy)
+python3 - "$TMP" "$ASV" "$TAX" << 'PY'
+import sys, glob, csv, os
+tmp, asv_out, tax_out = sys.argv[1:4]
+shared = glob.glob(os.path.join(tmp, "*.shared"))[0]
+with open(shared) as fh:
+    rows = [l.rstrip("\n").split("\t") for l in fh]
+hdr = rows[0]
+asv_cols = hdr[3:]
+with open(asv_out, "w", newline="") as out:
+    w = csv.writer(out, delimiter="\t")
+    w.writerow(["sample"] + asv_cols)
+    for r in rows[1:]:
+        w.writerow([r[1]] + r[3:])
+tax = glob.glob(os.path.join(tmp, "*.cons.taxonomy")) or glob.glob(os.path.join(tmp,"*.taxonomy"))
+with open(tax[0]) as fh, open(tax_out, "w") as out:
+    out.write("ASV\ttaxonomy\n")
+    next(fh, None)
+    for l in fh:
+        p = l.rstrip("\n").split("\t")
+        out.write(f"{p[0]}\t{p[-1]}\n")
+PY
+echo "[mothur_asv] wrote $ASV and $TAX"

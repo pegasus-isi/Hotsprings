@@ -1,0 +1,11 @@
+# Carbon-flux parameters (Fullerton et al. 2021, Methods + cell_ct.Rmd)
+A: 8.16                 # Magnabosco arc-crust intercept, log10(cells cm^-3)
+B: -0.94                # Magnabosco depth exponent
+isotherm_depth_m: 5000  # depth of 122 C isotherm at Nicoya coast (Harris & Wang 2010)
+along_trench_m: 273427  # along-trench width of the integration box (m)
+trench_to_arc_m: 100000 # trench-to-arc habitable distance (m)
+C_per_cell_gC: 2.3e-14  # 23 fgC per cell
+f_autotroph: 0.30       # fraction of cells that are autotrophs
+f_attached: 500         # attached-cell multiplier (range 100-1000)
+turnover_yr: 17         # population turnover time (yr)
+C_mantle_molC_yr: 6.3e10 # forearc carbon flux to mantle (Barry et al. 2019)

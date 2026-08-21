@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# trim_reads  R1.fastq.gz  R2.fastq.gz  OUT_R1.fq.gz  OUT_R2.fq.gz
+set -euo pipefail
+R1="$1"; R2="$2"; O1="$3"; O2="$4"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+trimmomatic PE -threads "${PEGASUS_CORES:-4}" \
+  "$R1" "$R2" \
+  "$O1" "$TMP/u1.fq.gz" \
+  "$O2" "$TMP/u2.fq.gz" \
+  LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:50
+echo "[trim_reads] wrote $O1 $O2"

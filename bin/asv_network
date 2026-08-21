@@ -1,0 +1,30 @@
+#!/usr/bin/env Rscript
+# asv_network  FILTERED.rds  ASV_CLIQUES.rds  ASV_EDGES.tsv
+# Dominant-ASV co-occurrence network: keep ASVs >=20 reads in >=3 samples,
+# Spearman correlations, retain rho>0.7, Louvain community detection.
+suppressMessages({library(phyloseq); library(igraph)})
+a <- commandArgs(trailingOnly=TRUE)
+ps <- readRDS(a[1]); clq_out <- a[2]; edge_out <- a[3]
+
+m <- as(otu_table(ps), "matrix")
+if (!taxa_are_rows(ps)) m <- t(m)                       # taxa as rows
+# prevalence filter: >=20 reads total AND present in >=3 samples
+keep <- rowSums(m) >= 20 & rowSums(m > 0) >= 3
+m <- m[keep, , drop=FALSE]
+
+cc <- cor(t(m), method="spearman", use="pairwise.complete.obs")
+cc[is.na(cc)] <- 0
+g  <- graph.adjacency(cc, mode="undirected", weighted=TRUE, diag=FALSE)
+g  <- igraph::simplify(g)
+g  <- delete_edges(g, E(g)[E(g)$weight <= 0.7])         # keep positive rho>0.7
+g  <- delete_vertices(g, V(g)[degree(g) == 0])
+
+lou <- cluster_louvain(g)
+V(g)$clique <- membership(lou)
+
+saveRDS(list(graph=g, membership=membership(lou),
+             matrix=m, modularity=modularity(lou)), clq_out)
+ed <- as_data_frame(g, what="edges")
+write.table(ed, edge_out, sep="\t", row.names=FALSE, quote=FALSE)
+cat("[asv_network] nodes:", vcount(g), " edges:", ecount(g),
+    " cliques:", length(lou), " Q:", round(modularity(lou),3), "\n")

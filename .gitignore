@@ -1,0 +1,13 @@
+work/
+output/
+*.yml
+!input/*.yml
+!reference_data/**
+transformations.yml
+replicas.yml
+sites.yml
+properties
+workflow.yml
+subductcr_dag.*
+*.dot
+__pycache__/

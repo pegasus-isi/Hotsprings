@@ -1,0 +1,27 @@
+#!/usr/bin/env Rscript
+# make_report  ASV_CLIQUE_ENV.tsv  GENE_CLIQUE_ENV.tsv  NMDS.tsv  ADONIS.tsv  FIG2.pdf  FLUX.tsv  REPORT.html
+a <- commandArgs(trailingOnly=TRUE)
+asv <- a[1]; gene <- a[2]; nmds <- a[3]; adonis <- a[4]; fig <- a[5]; flux <- a[6]; out <- a[7]
+rd <- function(f) if (file.exists(f)) read.delim(f, check.names=FALSE) else data.frame(note="missing")
+tbl <- function(d, n=15) {
+  d <- head(d, n)
+  paste0("<table border='1' cellpadding='4' style='border-collapse:collapse'><tr>",
+    paste0("<th>", names(d), "</th>", collapse=""), "</tr>",
+    paste0(apply(d, 1, function(r) paste0("<tr>", paste0("<td>", r, "</td>", collapse=""), "</tr>")), collapse=""),
+    "</table>")
+}
+flux_d <- rd(flux)
+html <- paste0(
+"<html><head><meta charset='utf-8'><title>SubductCR workflow report</title>",
+"<style>body{font-family:sans-serif;max-width:900px;margin:2em auto;line-height:1.6}",
+"h2{border-bottom:2px solid #0F6E56;padding-bottom:4px}</style></head><body>",
+"<h1>SubductCR &mdash; Pegasus workflow report</h1>",
+"<p>Rebuild of Fullerton et al. (2021), <i>Nat. Geosci.</i> pipeline.</p>",
+"<h2>Carbon flux</h2>", tbl(flux_d),
+"<h2>ADONIS (community vs geology factors)</h2>", tbl(rd(adonis)),
+"<h2>ASV clique &ndash; geochemistry (top tests)</h2>", tbl(rd(asv)),
+"<h2>Gene-clique &ndash; geochemistry (top tests)</h2>", tbl(rd(gene)),
+"<h2>Figure 2 &mdash; community NMDS</h2><p>See <code>", basename(fig), "</code>.</p>",
+"</body></html>")
+writeLines(html, out)
+cat("[make_report] wrote", out, "\n")

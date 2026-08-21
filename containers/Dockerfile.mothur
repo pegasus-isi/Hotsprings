@@ -1,0 +1,9 @@
+# mothur 1.48.0 via bioconda -> clean, pinned tag (no biocontainers hash-roulette).
+# Build for the cluster arch:  docker build --platform linux/amd64 ...
+FROM mambaorg/micromamba:1.5.10
+USER root
+RUN micromamba install -y -n base -c conda-forge -c bioconda mothur=1.48.0 \
+    && micromamba clean -a -y
+ENV PATH=/opt/conda/bin:$PATH
+# sanity check at build time
+RUN mothur "#quit()" >/dev/null 2>&1 || mothur --version || true

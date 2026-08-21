@@ -1,0 +1,36 @@
+#!/usr/bin/env Rscript
+# nmds_adonis  FILTERED.rds  GEOCHEM.csv  NMDS.tsv  ADONIS.tsv  FIG2.pdf
+# NMDS (Jaccard) ordination + PERMANOVA (adonis) of community vs geology
+# factors, Holm-corrected. Reproduces Fig. 2 clustering.
+suppressMessages({library(phyloseq); library(vegan); library(ggplot2)})
+a <- commandArgs(trailingOnly=TRUE)
+ps <- readRDS(a[1]); env <- read.csv(a[2], row.names=1, check.names=FALSE)
+nmds_out <- a[3]; adonis_out <- a[4]; fig_out <- a[5]
+
+comm <- as(otu_table(ps), "matrix"); if (taxa_are_rows(ps)) comm <- t(comm)
+meta <- data.frame(sample_data(ps))
+
+ord <- metaMDS(comm, distance="jaccard", trymax=100, trace=0)
+sc  <- as.data.frame(scores(ord, display="sites"))
+sc$sample <- rownames(sc)
+write.table(sc, nmds_out, sep="\t", row.names=FALSE, quote=FALSE)
+
+# PERMANOVA on the geology/geochemistry factors present in the metadata
+factors <- intersect(c("type","plate","province","region","geol_prov",
+                       "rocks","volcano","anions","cations"), colnames(meta))
+d <- vegdist(comm, method="jaccard")
+rows <- list()
+for (f in factors) {
+  fm <- as.formula(paste("d ~", f))
+  suppressWarnings(res <- try(adonis2(fm, data=meta, permutations=999), silent=TRUE))
+  if (!inherits(res,"try-error"))
+    rows[[f]] <- data.frame(factor=f, R2=res$R2[1], p=res$`Pr(>F)`[1])
+}
+at <- do.call(rbind, rows); at$p_holm <- p.adjust(at$p, method="holm")
+write.table(at, adonis_out, sep="\t", row.names=FALSE, quote=FALSE)
+
+p <- ggplot(sc, aes(NMDS1, NMDS2, label=sample)) +
+  geom_point(size=3) + geom_text(vjust=-0.8, size=3) +
+  theme_minimal() + labs(title="16S community NMDS (Jaccard)")
+ggsave(fig_out, p, width=7, height=6)
+cat("[nmds_adonis] stress:", round(ord$stress,3), "\n")

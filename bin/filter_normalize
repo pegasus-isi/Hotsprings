@@ -1,0 +1,40 @@
+#!/usr/bin/env Rscript
+# filter_normalize  ASV_TABLE.tsv  TAXONOMY.tsv  GEOCHEM.csv  FILTERED.rds
+# Ports Fullerton et al. 16S script: build phyloseq object, drop known
+# contaminant genera, normalise to relative-abundance x median library size,
+# prune taxa (>5 reads, >0 global), drop the hyperacidic PL outlier.
+suppressMessages({library(phyloseq); library(dplyr)})
+a <- commandArgs(trailingOnly=TRUE)
+asv_f <- a[1]; tax_f <- a[2]; geo_f <- a[3]; out <- a[4]
+
+# ASV table: rows = samples, cols = ASVs (as produced by mothur_asv)
+cnt <- as.matrix(read.csv(asv_f, sep="\t", row.names=1, check.names=FALSE))
+tax <- as.matrix(read.csv(tax_f, sep="\t", row.names=1, check.names=FALSE))
+smp <- read.csv(geo_f, row.names=1, check.names=FALSE)
+
+OTU <- otu_table(t(cnt), taxa_are_rows=TRUE)         # taxa as rows
+TAX <- tax_table(tax)
+SMP <- sample_data(smp[rownames(smp) %in% colnames(OTU), , drop=FALSE])
+ps  <- phyloseq(OTU, TAX, SMP)
+
+# --- remove known contaminant genera (skin/lab/faeces; paper Methods) ---
+contaminants <- c("Acinetobacter","Propionibacterium","Cutibacterium",
+                  "Staphylococcus","Streptococcus","Escherichia/Shigella")
+if ("Genus" %in% colnames(tax_table(ps))) {
+  keep <- !(as.character(tax_table(ps)[,"Genus"]) %in% contaminants)
+  ps <- prune_taxa(keep, ps)
+}
+
+# --- normalise: (x/sum(x)) * median(library size) ---
+med <- median(sample_sums(ps))
+ps  <- transform_sample_counts(ps, function(x) (x/sum(x))*med)
+
+# --- prune ---
+ps <- filter_taxa(ps, function(x) sum(x) > 0, TRUE)
+ps <- prune_taxa(taxa_sums(ps) > 5, ps)
+
+# --- drop hyperacidic crater-lake outlier PL if present ---
+if ("PL" %in% sample_names(ps)) ps <- prune_samples(sample_names(ps) != "PL", ps)
+
+saveRDS(ps, out)
+cat("[filter_normalize] taxa:", ntaxa(ps), " samples:", nsamples(ps), "\n")

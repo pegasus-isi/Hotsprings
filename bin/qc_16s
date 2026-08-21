@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# qc_16s  R1.fastq.gz  R2.fastq.gz  OUT.fasta
+# Quality-filters and merges paired 16S reads, removes chimeras (vsearch/UCHIME),
+# emits a de-replicated FASTA ready for mothur ASV inference.
+set -euo pipefail
+R1="$1"; R2="$2"; OUT="$3"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+# 1. merge pairs
+vsearch --fastq_mergepairs "$R1" --reverse "$R2" \
+        --fastqout "$TMP/merged.fq" --fastq_maxee 1.0 --fastq_minlen 250
+# 2. quality filter -> fasta
+vsearch --fastq_filter "$TMP/merged.fq" --fastaout "$TMP/filt.fasta" --fastq_maxee 1.0
+# 3. dereplicate
+vsearch --derep_fulllength "$TMP/filt.fasta" --sizeout --output "$TMP/derep.fasta"
+# 4. de-novo chimera removal (UCHIME algorithm)
+vsearch --uchime_denovo "$TMP/derep.fasta" --nonchimeras "$OUT"
+echo "[qc_16s] wrote $OUT"

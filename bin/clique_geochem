@@ -1,0 +1,40 @@
+#!/usr/bin/env Rscript
+# clique_geochem  ASV_CLIQUES.rds  GEOCHEM.csv  ASV_CLIQUE_ENV.tsv
+# For each clique: cumulative abundance vs every environmental predictor via
+# Spearman + Pearson; VSURF random-forest ranking picks the top variable.
+suppressMessages({library(VSURF)})
+a <- commandArgs(trailingOnly=TRUE)
+obj <- readRDS(a[1]); env <- read.csv(a[2], row.names=1, check.names=FALSE); out <- a[3]
+
+m <- obj$matrix; mem <- obj$membership
+num_env <- env[, sapply(env, is.numeric), drop=FALSE]
+samples <- intersect(colnames(m), rownames(num_env))
+m <- m[, samples, drop=FALSE]; num_env <- num_env[samples, , drop=FALSE]
+
+res <- list()
+for (cl in sort(unique(mem))) {
+  members <- names(mem)[mem == cl]
+  ab <- colSums(m[rownames(m) %in% members, , drop=FALSE], na.rm=TRUE)
+  for (v in colnames(num_env)) {
+    x <- num_env[[v]]; ok <- is.finite(x) & is.finite(ab)
+    if (sum(ok) < 4) next
+    sp <- suppressWarnings(cor.test(x[ok], ab[ok], method="spearman"))
+    pe <- suppressWarnings(cor.test(x[ok], ab[ok], method="pearson"))
+    res[[length(res)+1]] <- data.frame(
+      clique=cl, variable=v,
+      spearman_rho=unname(sp$estimate), spearman_p=sp$p.value,
+      pearson_r=unname(pe$estimate),   pearson_p=pe$p.value)
+  }
+  # VSURF: which env variable best explains this clique's abundance
+  df <- na.omit(data.frame(y=ab, num_env))
+  if (nrow(df) >= 8 && ncol(df) > 2) {
+    vs <- try(VSURF(y ~ ., data=df, ntree=500, verbose=FALSE), silent=TRUE)
+    if (!inherits(vs,"try-error") && length(vs$varselect.pred)>0)
+      cat(sprintf("[clique_geochem] clique %d top RF var: %s\n",
+          cl, colnames(df)[-1][vs$varselect.pred[1]]))
+  }
+}
+tab <- do.call(rbind, res)
+tab$spearman_p_holm <- p.adjust(tab$spearman_p, method="holm")
+write.table(tab, out, sep="\t", row.names=FALSE, quote=FALSE)
+cat("[clique_geochem] wrote", nrow(tab), "clique-variable tests\n")
