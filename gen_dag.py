@@ -1,12 +1,11 @@
 import graphviz
 
-SAMPLES = [
-    ("ES",1,1),("RS",1,1),("SM",1,0),("SR",1,1),("SI",1,0),("MT",1,1),
-    ("BQ",1,0),("VC",1,1),("BR",1,1),("CY",1,0),("SL",1,1),("QN",1,1),
-    ("TC",1,0),("RV",1,1),("ET",1,0),("QH",1,1),("EP",1,0),("HN",1,0),
-]
-S16 = [s for s in SAMPLES if s[1]]
-SMG = [s for s in SAMPLES if s[2]]
+# Real sequencing libraries from the authors' tables (bac_normalized_count.csv
+# = 32 16S libraries; mifaser_dataset.csv = 37 metagenome libraries).
+LIBS_16S = ['BRF1','BRF2','BRS1','BRS2','CYF','CYS','EPF','EPS','ESF9','ETF','ETS','FAF','FAS','MTF','PFF','PFS','PGF','PGS','PLS','QHF2','QHS1','QHS2','QNF','QNS','RSS','SIS','SLF','SLS','STS','TCF','TCS','VCS']
+LIBS_MG  = ['ARS','BQF','BQS','BQS1','BR1F','BRF1','BRF2','BRS1','BRS2','CYF','CYS','EPF','EPS','ESF9','ETS','FAS','MTF','PBS','PFF','PFS','PGF','PGS','PLS','QH2F','QHS1','QHS2','QNF','QNS','RSF','RSS','RVF','SIF','SIS','SLF','SLS','TCF','TCS']
+S16 = [(x, 1, int(x in LIBS_MG)) for x in LIBS_16S]
+SMG = [(x, int(x in LIBS_16S), 1) for x in LIBS_MG]
 
 g = graphviz.Digraph("subductcr", format="pdf")
 g.attr(rankdir="TB", splines="spline", nodesep="0.18", ranksep="0.6",
@@ -25,8 +24,9 @@ def node(name,label,fill,shape="box",tcolor="#2C2C2A"):
     g.node(name,label,fillcolor=fill,shape=shape,fontcolor=tcolor)
 
 # --- input reference files ---
-node("silva","silva_v132.db",GRAY,shape="note")
-node("gsplus","gsplus.db",GRAY,shape="note")
+node("silva","silva_v132.db\n(full)",GRAY,shape="note")
+node("silvatax","silva_v132.tax\n(full)",GRAY,shape="note")
+node("mkref","make_silva_ref\n(pcr.seqs V4-V5)",TEAL,tcolor=TEAL_D)
 node("geochem","geochem.csv",GRAY,shape="note")
 node("cells","cell_counts.csv",GRAY,shape="note")
 
@@ -43,7 +43,7 @@ with g.subgraph(name="cluster_16s") as c:
 
 for name,_,_ in S16:
     g.edge(f"qc_{name}","mothur")
-g.edge("silva","mothur")
+g.edge("silva","mkref"); g.edge("silvatax","mkref"); g.edge("mkref","mothur")
 g.edge("mothur","filter"); g.edge("geochem","filter")
 g.edge("filter","asvnet"); g.edge("asvnet","asvcg"); g.edge("geochem","asvcg")
 
@@ -61,7 +61,6 @@ with g.subgraph(name="cluster_mg") as c:
 for name,_,_ in SMG:
     g.edge(f"trim_{name}",f"mif_{name}")
     g.edge(f"mif_{name}","genemerge")
-g.edge("gsplus","genemerge")  # (db feeds mifaser; simplified edge to cluster)
 g.edge("genemerge","genenet"); g.edge("genenet","genecg"); g.edge("geochem","genecg")
 
 # --- shared endpoints ---

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# make_silva_ref  FULL_SILVA.align  FULL_SILVA.tax  OUT_REF.db  OUT_REF.tax
+# Regenerates a silva.nr_v132_vamps-equivalent reference by trimming full
+# SILVA v132 to the V4-V5 region (primers 518F/926R) with mothur pcr.seqs.
+# Functionally equivalent to the authors' file; exact only if their trim
+# coordinates match. If the real silva_v132_vamps.db is supplied instead,
+# this job is bypassed (see the generator's USE_REAL_VAMPS note).
+set -euo pipefail
+SILVA="$1"; TAX="$2"; OUTREF="$3"; OUTTAX="$4"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+cat > "$TMP/v4v5.oligos" <<OLIGO
+forward CCAGCAGCYGCGGTAAN
+reverse CCGTCAATTCNTTTRAGT
+OLIGO
+cp "$SILVA" "$TMP/ref.align"
+mothur "#pcr.seqs(fasta=$TMP/ref.align, oligos=$TMP/v4v5.oligos, keepdots=F, pdiffs=2, rdiffs=2, processors=${PEGASUS_CORES:-8})"
+cp "$TMP/ref.pcr.align" "$OUTREF"
+cp "$TAX" "$OUTTAX"
+echo "[make_silva_ref] wrote $OUTREF (+ $OUTTAX)"

@@ -1,0 +1,56 @@
+#!/usr/bin/env Rscript
+# rep_metagenome  MIFASER.csv  EC_CARBON.csv  SAMPLE.csv  GENE_CLIQUES.rds  GENE_CLIQUE_ENV.tsv
+# Reproduces the metagenome carbon-fixation analysis from the authors' tables
+# (mifaser_dataset.csv: index,EC,<sample cols>; ec_list_carbon.csv: carbon ECs).
+suppressMessages({library(igraph)})
+a <- commandArgs(trailingOnly=TRUE)
+mif_f<-a[1]; ec_f<-a[2]; samp_f<-a[3]; clq_out<-a[4]; cg_out<-a[5]
+
+d <- read.csv(mif_f, check.names=FALSE)
+ec_col <- if ("EC" %in% names(d)) "EC" else names(d)[2]
+sample_cols <- setdiff(names(d), c(names(d)[1], ec_col))
+mat <- as.matrix(d[, sample_cols, drop=FALSE]); rownames(mat) <- as.character(d[[ec_col]])
+mat[is.na(mat)] <- 0
+
+carbon <- tryCatch(as.character(read.csv(ec_f, header=FALSE)[[1]]), error=function(e) character(0))
+if (length(carbon)) mat <- mat[rownames(mat) %in% carbon, , drop=FALSE]
+mat <- mat[rowSums(mat) > 0, , drop=FALSE]
+cat(sprintf("[rep_metagenome] %d carbon ECs x %d samples\n", nrow(mat), ncol(mat)))
+
+# --- gene co-occurrence network (Spearman rho>0.5) + Louvain (Fig. 4a) ---
+cc <- cor(t(mat), method="spearman"); cc[is.na(cc)] <- 0
+g  <- igraph::simplify(graph.adjacency(cc, mode="undirected", weighted=TRUE, diag=FALSE))
+g  <- delete_edges(g, E(g)[E(g)$weight <= 0.5])
+g  <- delete_vertices(g, V(g)[degree(g)==0])
+lou <- cluster_louvain(g)
+saveRDS(list(graph=g, membership=membership(lou), matrix=mat, modularity=modularity(lou)), clq_out)
+cat(sprintf("[rep_metagenome] %d gene-cliques (Q=%.3f)\n", length(lou), modularity(lou)))
+
+# --- gene-clique vs geochemistry (Fig. 4b). NOTE: metagenome sample codes
+#     (ARS,BQF,...) map to env by 2-letter site code, averaged over that site's
+#     rows. This is approximate; the authors used a purpose-built env table. ---
+samp <- read.csv(samp_f, check.names=FALSE)
+code_col <- if ("code" %in% names(samp)) "code" else names(samp)[2]
+num <- samp[, sapply(samp, is.numeric), drop=FALSE]
+env_by_code <- aggregate(num, by=list(code=samp[[code_col]]), FUN=function(x) mean(x, na.rm=TRUE))
+rownames(env_by_code) <- env_by_code$code; env_by_code$code <- NULL
+
+mem <- membership(lou)
+res <- list()
+for (cl in sort(unique(mem))) {
+  members <- names(mem)[mem==cl]
+  ab <- colSums(mat[rownames(mat) %in% members, , drop=FALSE], na.rm=TRUE)  # per sample col
+  codes <- toupper(substr(colnames(mat), 1, 2))
+  for (v in colnames(env_by_code)) {
+    ev <- env_by_code[codes, v]
+    ok <- is.finite(ev) & is.finite(ab)
+    if (sum(ok) < 4) next
+    sp <- suppressWarnings(cor.test(ev[ok], ab[ok], method="spearman"))
+    res[[length(res)+1]] <- data.frame(gene_clique=cl, variable=v,
+      spearman_rho=unname(sp$estimate), spearman_p=sp$p.value, n=sum(ok))
+  }
+}
+tab <- do.call(rbind, res)
+if (!is.null(tab)) { tab$spearman_p_holm <- p.adjust(tab$spearman_p, method="holm")
+  write.table(tab, cg_out, sep="\t", row.names=FALSE, quote=FALSE) }
+cat("[rep_metagenome] wrote gene-clique-env (approximate mapping); expect DIC for the rTCA clique\n")

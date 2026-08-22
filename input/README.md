@@ -9,7 +9,6 @@ replica catalog built in `subductcr_workflow.py`.
 
 ## References
 - `silva_v132.db` — SILVA v132 reference alignment + taxonomy (mothur format)
-- `gsplus.db`     — mi-faser Gold-Standard-Plus database
 
 ## Tables (provided as test inputs under ../reference_data/)
 - `geochem.csv`      — environmental + geochemistry table (SubductCR_bac_sample_table.csv)

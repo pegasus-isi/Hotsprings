@@ -14,8 +14,8 @@ from the reads onward is expressed as a DAG of containerised jobs.
 Two parallel tracks fan out per sequencing library and then merge:
 
 ```
- 16S:  qc_16s[x18] -> mothur_asv -> filter_normalize -> asv_network -> clique_geochem
- MG:   trim_reads[x10] -> mifaser[x10] -> gene_merge -> gene_network -> gene_geochem
+ 16S:  qc_16s[x32] -> mothur_asv -> filter_normalize -> asv_network -> clique_geochem
+ MG:   trim_reads[x37] -> mifaser[x37] -> gene_merge -> gene_network -> gene_geochem
                                           \
  shared:  filter_normalize -> nmds_adonis  }-> make_report
           (cell_counts,geochem) -> carbon_flux
