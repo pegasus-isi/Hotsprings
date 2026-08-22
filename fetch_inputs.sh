@@ -18,9 +18,7 @@
 #   ./fetch_inputs.sh --no-install   # do not auto-install sra-tools/edirect
 #
 # Prereqs (install/module-load first):
-#   wget or curl, tar
-#   sra-tools  (prefetch, fasterq-dump)   -- for --reads
-#   entrez-direct (esearch, efetch)       -- to resolve run accessions
+#   wget or curl, tar        (reads are pulled from ENA over HTTPS)
 
 # =====================================================================
 set -euo pipefail
@@ -109,9 +107,8 @@ install_edirect(){
 }
 
 ensure_read_tools(){
-  if [[ $DO_INSTALL -eq 0 ]]; then return 0; fi
-  install_sra_tools || true
-  install_edirect || true
+  # Reads are fetched from ENA over HTTPS -- only wget/curl needed.
+  have wget || have curl || { echo "ERROR: need wget or curl for reads"; exit 1; }
 }
 
 # ---------------------------------------------------------------------
@@ -164,52 +161,50 @@ fi
 # ---------------------------------------------------------------------
 # 4. Raw reads from SRA
 # ---------------------------------------------------------------------
+# ENA gives direct fastq.gz URLs + a run table in one HTTPS call (no sra-tools,
+# no edirect, no Perl). We map each run to a sample code using the authoritative
+# sample table shipped in the repo (reference_data/geochem.csv: sample,code,station).
+map_code(){ # lib alias  -> best-guess sample code
+  local lib="$1" alias="$2" t="$REF/geochem.csv" code=""
+  if [[ -f "$t" ]]; then
+    # match the run's library/alias against the station column (col 3)
+    code=$(awk -F, -v L="$lib" -v A="$alias" 'NR>1 && $3!="" { if (index(L,$3)||index(A,$3)) {print $2; exit} }' "$t")
+    # else against the 2-letter code column (col 2)
+    [[ -z "$code" ]] && code=$(awk -F, -v L="$lib" -v A="$alias" 'NR>1 && $2!="" { if (index(L,$2)||index(A,$2)) {print $2; exit} }' "$t")
+  fi
+  [[ -z "$code" ]] && code="$(echo "${lib:-$alias}" | tr -c 'A-Za-z0-9' '_' | sed 's/_*$//')"
+  echo "$code"
+}
+
 fetch_project(){ # fetch_project BIOPROJECT SUFFIX(16S|MG)
   local bp="$1" suffix="$2"
-  echo "==> [reads/$suffix] BioProject $bp"
-  local runinfo="$IN/runinfo_${suffix}.csv"
-  if [[ ! -f "$runinfo" ]]; then
-    have esearch && have efetch || { echo "    ERROR: entrez-direct (esearch/efetch) required to resolve $bp"; return 1; }
-    esearch -db sra -query "$bp" | efetch -format runinfo > "$runinfo"
-  fi
-  # columns: Run(1) ... LibraryName ... SampleName ; find them by header
-  local hdr; hdr="$(head -1 "$runinfo")"
-  local ci_run ci_lib ci_smp
-  ci_run=$(awk -F, -v h="$hdr" 'BEGIN{n=split(h,a,",");for(i=1;i<=n;i++)if(a[i]=="Run")print i}')
-  ci_lib=$(awk -F, -v h="$hdr" 'BEGIN{n=split(h,a,",");for(i=1;i<=n;i++)if(a[i]=="LibraryName")print i}')
-  ci_smp=$(awk -F, -v h="$hdr" 'BEGIN{n=split(h,a,",");for(i=1;i<=n;i++)if(a[i]=="SampleName")print i}')
-
-  tail -n +2 "$runinfo" | while IFS=, read -r -a f; do
-    local run="${f[$((ci_run-1))]}"
-    local lib="${f[$((ci_lib-1))]:-}" smp="${f[$((ci_smp-1))]:-}"
+  echo "==> [reads/$suffix] BioProject $bp (via ENA)"
+  local tsv="$IN/ena_${suffix}.tsv"
+  local url="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${bp}&result=read_run&fields=run_accession,library_name,sample_alias,fastq_ftp&format=tsv&limit=0"
+  dl "$url" "$tsv"
+  local n; n=$(($(wc -l < "$tsv")-1))
+  echo "    $n runs listed"
+  # cols: run_accession(1) library_name(2) sample_alias(3) fastq_ftp(4)
+  tail -n +2 "$tsv" | while IFS=$'\t' read -r run lib alias ftp; do
     [[ -z "$run" ]] && continue
-    # map to one of our sample codes by matching lib/sample text
-    local code=""
-    for s in "${SAMPLES[@]}"; do
-      if [[ "$lib" == *"$s"* || "$smp" == *"$s"* ]]; then code="$s"; break; fi
-    done
-    if [[ -z "$code" ]]; then
-      echo "    ? run $run: no sample-code match (lib='$lib' smp='$smp') -> using $run"
-      code="$run"
-    fi
+    if [[ -z "$ftp" ]]; then echo "    $run: no fastq_ftp on ENA yet, skip"; continue; fi
+    local code; code="$(map_code "$lib" "$alias")"
+    local r1u="${ftp%%;*}" r2u="${ftp##*;}"
     local out1="$IN/${code}_${suffix}_R1.fastq.gz" out2="$IN/${code}_${suffix}_R2.fastq.gz"
     if [[ -f "$out1" && -f "$out2" ]]; then echo "    $code ($run) present, skip"; continue; fi
-    echo "    downloading $run -> $code"
-    prefetch "$run" -O "$IN/sra" >/dev/null
-    fasterq-dump "$IN/sra/$run/$run.sra" -O "$IN/sra" --split-files -e "$THREADS" >/dev/null
-    gzip -c "$IN/sra/${run}_1.fastq" > "$out1"
-    gzip -c "$IN/sra/${run}_2.fastq" > "$out2"
-    rm -f "$IN/sra/${run}"_*.fastq
+    echo "    $run -> ${code}   (lib='$lib' alias='$alias')"
+    dl "https://$r1u" "$out1"
+    if [[ "$r2u" != "$r1u" ]]; then dl "https://$r2u" "$out2"; else echo "      note: single-end run, no R2"; fi
   done
+  echo "    mapping written to $tsv  (verify code assignments before running!)"
 }
 
 if [[ $DO_READS -eq 1 ]]; then
   ensure_read_tools
-  have prefetch && have fasterq-dump || { echo "ERROR: sra-tools (prefetch, fasterq-dump) required for --reads (auto-install failed; install manually or use --no-install)"; exit 1; }
   fetch_project "$BP_16S" "16S"
   fetch_project "$BP_MG"  "MG"
-  echo "    NOTE: verify the SRA->sample mapping above; SRA metadata field names"
-  echo "          vary, so spot-check that codes (ES,RS,...) matched correctly."
+  echo "    NOTE: run->code mapping is heuristic (matched against the repo sample"
+  echo "          table). Spot-check ena_16S.tsv / ena_MG.tsv and rename if needed."
 fi
 
 # ---------------------------------------------------------------------
