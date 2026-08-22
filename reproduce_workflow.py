@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 
 from Pegasus.api import (
-    Arch, Container, Directory, File, FileServer, Job, Operation, OS,
+    Arch, Container, Directory, File, FileServer, Job, Namespace, Operation, OS,
     Properties, Site, SiteCatalog, Transformation, TransformationCatalog,
     Workflow, ReplicaCatalog,
 )
@@ -71,27 +71,44 @@ def build_site_catalog() -> SiteCatalog:
 
 
 def r_container():
-    """The R container only -- all reproduce jobs are R."""
+    """The R container only -- all reproduce jobs are R.
+
+    SUBDUCTCR_USE_SIF=1   -> use the local .sif on the submit (local) site.
+    SUBDUCTCR_BYPASS=1    -> bypass_staging: don't copy the .sif into each job's
+                            scratch and mount it there (that mount is what an
+                            ACCESS/OSG node denies with "Failed to set mount
+                            propagation"). Instead reference it in place.
+    """
     user = "swarmourr"; tag = "1.0"
+    bypass = os.environ.get("SUBDUCTCR_BYPASS", "0") == "1"
     if os.environ.get("SUBDUCTCR_USE_SIF", "0") == "1":
         return Container("r_ctr", Container.SINGULARITY,
-                         image=f"file://{SIF_DIR}/subductcr-r.sif", image_site="local")
+                         image=f"file://{SIF_DIR}/subductcr-r.sif",
+                         image_site="local", bypass_staging=bypass)
     return Container("r_ctr", Container.DOCKER,
-                     image=f"docker://{user}/subductcr-r:{tag}")
+                     image=f"docker://{user}/subductcr-r:{tag}",
+                     bypass_staging=bypass)
 
 
 def build_tc(r_c) -> TransformationCatalog:
     tc = TransformationCatalog()
     tc.add_containers(r_c)
 
-    rep_16s = Transformation("rep_16s", site="local", pfn=str(BIN / "rep_16s"),
-                             is_stageable=True, container=r_c)
-    rep_mg = Transformation("rep_metagenome", site="local", pfn=str(BIN / "rep_metagenome"),
-                            is_stageable=True, container=r_c)
-    rep_flux = Transformation("rep_carbon_flux", site="local", pfn=str(BIN / "rep_carbon_flux"),
+    rep_16s = (Transformation("rep_16s", site="local", pfn=str(BIN / "rep_16s"),
                               is_stageable=True, container=r_c)
-    make_report = Transformation("make_report", site="local", pfn=str(BIN / "make_report"),
-                                 is_stageable=True, container=r_c)
+               .add_profiles(Namespace.CONDOR, key="request_memory", value="16 GB")
+               .add_profiles(Namespace.CONDOR, key="request_cpus", value="2")
+               .add_profiles(Namespace.CONDOR, key="request_disk", value="8 GB"))
+    rep_mg = (Transformation("rep_metagenome", site="local", pfn=str(BIN / "rep_metagenome"),
+                             is_stageable=True, container=r_c)
+              .add_profiles(Namespace.CONDOR, key="request_memory", value="8 GB")
+              .add_profiles(Namespace.CONDOR, key="request_disk", value="4 GB"))
+    rep_flux = (Transformation("rep_carbon_flux", site="local", pfn=str(BIN / "rep_carbon_flux"),
+                               is_stageable=True, container=r_c)
+                .add_profiles(Namespace.CONDOR, key="request_memory", value="4 GB"))
+    make_report = (Transformation("make_report", site="local", pfn=str(BIN / "make_report"),
+                                  is_stageable=True, container=r_c)
+                   .add_profiles(Namespace.CONDOR, key="request_memory", value="4 GB"))
     tc.add_transformations(rep_16s, rep_mg, rep_flux, make_report)
     tc.write()
     return tc
