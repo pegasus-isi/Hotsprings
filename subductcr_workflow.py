@@ -172,6 +172,7 @@ def build_containers():
                 name,
                 Container.SINGULARITY,
                 image=f"file://{SIF_DIR}/subductcr-{tool}.sif",
+                image_site="local",
             )
         return Container(
             name,
