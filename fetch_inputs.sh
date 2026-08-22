@@ -4,7 +4,7 @@
 #
 # Fills input/ with:
 #   silva_v132.db (+ .tax)   SILVA v132 reference for mothur classify.seqs
-#   gsplus.db                mi-faser Gold-Standard-Plus DB (from the container)
+#   (GS+ DB is built into the mi-faser container -- not downloaded)
 #   geochem.csv              from reference_data/ (already in repo)
 #   cell_counts.csv          template scaffolded from reference_data/cell_ct.Rmd
 #   <SAMPLE>_16S_R{1,2}.fastq.gz   16S reads  (SRA BioProject PRJNA579365)
@@ -20,7 +20,7 @@
 #   wget or curl, tar
 #   sra-tools  (prefetch, fasterq-dump)   -- for --reads
 #   entrez-direct (esearch, efetch)       -- to resolve run accessions
-#   docker OR singularity/apptainer       -- to extract the GS+ DB
+
 # =====================================================================
 set -euo pipefail
 
@@ -80,38 +80,11 @@ if [[ $DO_SILVA -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------
-# 2. mi-faser Gold-Standard-Plus DB (extract from the container)
+# 2. mi-faser GS+ DB -- built into the container; nothing to download
 # ---------------------------------------------------------------------
 if [[ $DO_GSPLUS -eq 1 ]]; then
-  echo "==> [gsplus] mi-faser GS+ database"
-  if [[ -e "$IN/gsplus.db" ]]; then
-    echo "    already present, skipping"
-  elif have docker; then
-    cid="$(docker create bromberglab/mifaser:latest)"
-    # GS+ ships inside the image under the mifaser package 'database' dir
-    docker cp "$cid:/mifaser/database" "$IN/gsplus.db" 2>/dev/null \
-      || docker cp "$cid:/usr/local/lib/python3/dist-packages/mifaser/database" "$IN/gsplus.db" 2>/dev/null \
-      || echo "    WARN: could not locate DB path inside image; see note below"
-    docker rm "$cid" >/dev/null
-    [[ -e "$IN/gsplus.db" ]] && echo "    extracted gsplus.db from container"
-  elif have singularity || have apptainer; then
-    SING=$(command -v singularity || command -v apptainer)
-    SIF="$ROOT/containers/sif/subductcr-mifaser.sif"
-    [[ -f "$SIF" ]] || SIF="docker://bromberglab/mifaser:latest"
-    "$SING" exec "$SIF" bash -c 'cp -r $(python3 -c "import mifaser,os;print(os.path.join(os.path.dirname(mifaser.__file__),\"database\"))") /tmp/gsplusdb' \
-      && "$SING" exec "$SIF" cp -r /tmp/gsplusdb "$IN/gsplus.db" 2>/dev/null \
-      || echo "    WARN: extraction via singularity failed; see note below"
-  else
-    echo "    WARN: no docker/singularity to extract GS+."
-  fi
-  if [[ ! -e "$IN/gsplus.db" ]]; then
-    cat <<'EOF'
-    NOTE: GS+ is bundled inside the mi-faser container. If extraction failed,
-    the simplest fix is to have the mifaser job use the built-in DB name
-    instead of a staged file: edit bin/mifaser to call `mifaser ... -d GS+`
-    and remove gsplus.db from the replica catalog in subductcr_workflow.py.
-EOF
-  fi
+  echo "==> [gsplus] built into the mi-faser container (bin/mifaser uses -d GS+)"
+  echo "    nothing to download; gsplus.db is no longer a workflow input"
 fi
 
 # ---------------------------------------------------------------------
@@ -187,7 +160,7 @@ fi
 # 5. Status
 # ---------------------------------------------------------------------
 echo; echo "==> input/ status"
-for f in silva_v132.db gsplus.db geochem.csv cell_counts.csv flux_params.yml; do
+for f in silva_v132.db geochem.csv cell_counts.csv flux_params.yml; do
   [[ -e "$IN/$f" ]] && echo "   OK       $f" || echo "   MISSING  $f"
 done
 echo "   16S read pairs: $(ls "$IN"/*_16S_R1.fastq.gz 2>/dev/null | wc -l) / 18"
