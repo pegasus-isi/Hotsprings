@@ -67,29 +67,18 @@ SIF_DIR = BASE / "containers" / "sif"   # where build_sif.sh writes the .sif fil
 # One entry per sequencing library. In the paper: 18 sites for 16S,
 # with 10 also having metagenomes. Here samples carry flags for which
 # track(s) they participate in.
-SAMPLES = [
-    # (name,   has_16s, has_metagenome)
-    ("ES", True,  True),
-    ("RS", True,  True),
-    ("SM", True,  False),
-    ("SR", True,  True),
-    ("SI", True,  False),
-    ("MT", True,  True),
-    ("BQ", True,  False),
-    ("VC", True,  True),
-    ("BR", True,  True),
-    ("CY", True,  False),
-    ("SL", True,  True),
-    ("QN", True,  True),
-    ("TC", True,  False),
-    ("RV", True,  True),
-    ("ET", True,  False),
-    ("QH", True,  True),
-    ("EP", True,  False),
-    ("HN", True,  False),
-]
-SAMPLES_16S = [s for s in SAMPLES if s[1]]
-SAMPLES_MG = [s for s in SAMPLES if s[2]]
+# Real sequencing libraries, taken directly from the authors' published tables
+# (bac_normalized_count.csv columns = 32 16S libraries; mifaser_dataset.csv
+# columns = 37 metagenome libraries). Trailing F = fluid, S = sediment.
+LIBS_16S = ['BRF1', 'BRF2', 'BRS1', 'BRS2', 'CYF', 'CYS', 'EPF', 'EPS', 'ESF9', 'ETF', 'ETS', 'FAF', 'FAS', 'MTF', 'PFF', 'PFS', 'PGF', 'PGS', 'PLS', 'QHF2', 'QHS1', 'QHS2', 'QNF', 'QNS', 'RSS', 'SIS', 'SLF', 'SLS', 'STS', 'TCF', 'TCS', 'VCS']
+LIBS_MG = ['ARS', 'BQF', 'BQS', 'BQS1', 'BR1F', 'BRF1', 'BRF2', 'BRS1', 'BRS2', 'CYF', 'CYS', 'EPF', 'EPS', 'ESF9', 'ETS', 'FAS', 'MTF', 'PBS', 'PFF', 'PFS', 'PGF', 'PGS', 'PLS', 'QH2F', 'QHS1', 'QHS2', 'QNF', 'QNS', 'RSF', 'RSS', 'RVF', 'SIF', 'SIS', 'SLF', 'SLS', 'TCF', 'TCS']
+
+# unified view for the per-sample replica catalog
+SAMPLES = ([(x, True, False) for x in LIBS_16S if x not in LIBS_MG]
+           + [(x, False, True) for x in LIBS_MG if x not in LIBS_16S]
+           + [(x, True, True) for x in LIBS_16S if x in LIBS_MG])
+SAMPLES_16S = [(x, True, x in LIBS_MG) for x in LIBS_16S]
+SAMPLES_MG  = [(x, x in LIBS_16S, True) for x in LIBS_MG]
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +157,11 @@ def build_containers():
 
     def make(name, tool):
         if USE_SIF:
+            # image_site="local": the .sif lives on the submit (local) site, so
+            # Pegasus stages it to the execution site instead of tagging it
+            # CONTAINER_SITE (which fails to transfer to condorpool).
+            # If containers/sif is on a filesystem shared with the compute
+            # nodes, add bypass_staging=True to skip the transfer entirely.
             return Container(
                 name,
                 Container.SINGULARITY,
@@ -207,6 +201,13 @@ def build_transformation_catalog(mothur_c, bio_c, mifaser_c, r_c) -> Transformat
     # --- 16S track ---
     # bin/qc_16s   R1 R2 out.fasta   (QC, merge pairs, UCHIME chimera removal)
     qc_16s = T("qc_16s", bio_c)
+    # bin/make_silva_ref  full_silva.align  full_silva.tax  vamps.db  vamps.tax
+    make_silva_ref = (
+        T("make_silva_ref", mothur_c)
+        .add_profiles(Namespace.CONDOR, key="request_cpus", value="8")
+        .add_profiles(Namespace.CONDOR, key="request_memory", value="32 GB")
+        .add_profiles(Namespace.PEGASUS, key="runtime", value="14400")  # 4 h
+    )
     # bin/mothur_asv  <cleaned fastas...> silva.db  asv_table.tsv taxonomy.tsv
     mothur_asv = (
         T("mothur_asv", mothur_c)
@@ -230,7 +231,7 @@ def build_transformation_catalog(mothur_c, bio_c, mifaser_c, r_c) -> Transformat
     trim_reads = T("trim_reads", bio_c).add_profiles(
         Namespace.CONDOR, key="request_cpus", value="4"
     )
-    # bin/mifaser  R1 R2 gsplus.db  enzyme_abund.tsv
+    # bin/mifaser  R1 R2  enzyme_abund.tsv   (GS+ DB is built into the container)
     mifaser = (
         T("mifaser", mifaser_c)
         .add_profiles(Namespace.CONDOR, key="request_cpus", value="8")
@@ -257,7 +258,7 @@ def build_transformation_catalog(mothur_c, bio_c, mifaser_c, r_c) -> Transformat
     make_report = T("make_report", r_c)
 
     tc.add_transformations(
-        qc_16s, mothur_asv, filter_normalize, asv_network, clique_geochem,
+        make_silva_ref, qc_16s, mothur_asv, filter_normalize, asv_network, clique_geochem,
         trim_reads, mifaser, gene_merge, gene_network, gene_geochem,
         nmds_adonis, carbon_flux, make_report,
     )
@@ -272,14 +273,14 @@ def build_replica_catalog():
     rc = ReplicaCatalog()
 
     # Shared references.
-    silva = File("silva_v132.db")
-    gsplus = File("gsplus.db")
+    silva = File("silva_v132.db")        # FULL SILVA v132 alignment (input)
+    silva_tax = File("silva_v132.tax")   # FULL SILVA v132 taxonomy (input)
     geochem = File("geochem.csv")           # Supplementary Tables 1-3
     cell_counts = File("cell_counts.csv")   # flow-cytometry cell densities
     flux_params = File("flux_params.yml")   # t2, f_autotroph, C_cells, f_attached...
 
     rc.add_replica("local", silva, str(INPUT / "silva_v132.db"))
-    rc.add_replica("local", gsplus, str(INPUT / "gsplus.db"))
+    rc.add_replica("local", silva_tax, str(INPUT / "silva_v132.tax"))
     rc.add_replica("local", geochem, str(INPUT / "geochem.csv"))
     rc.add_replica("local", cell_counts, str(INPUT / "cell_counts.csv"))
     rc.add_replica("local", flux_params, str(INPUT / "flux_params.yml"))
@@ -301,7 +302,7 @@ def build_replica_catalog():
             reads[(name, "mg")] = (m1, m2)
 
     rc.write()
-    refs = dict(silva=silva, gsplus=gsplus, geochem=geochem,
+    refs = dict(silva=silva, silva_tax=silva_tax, geochem=geochem,
                 cell_counts=cell_counts, flux_params=flux_params)
     return rc, refs, reads
 
@@ -313,7 +314,21 @@ def build_workflow(refs, reads) -> Workflow:
     wf = Workflow("subductcr")
 
     silva = refs["silva"]
-    gsplus = refs["gsplus"]
+    silva_tax = refs["silva_tax"]
+
+    # --- generate the V4-V5 reference (silva.nr_v132_vamps equivalent) ---
+    # Trims full SILVA v132 to the amplified region so mothur classifies against
+    # the same window the authors used. Supply the real silva_v132_vamps.db to
+    # skip this and reproduce exactly.
+    vamps_ref = File("silva_v132_vamps.db")
+    vamps_tax = File("silva_v132_vamps.tax")
+    ref_job = (
+        Job("make_silva_ref", _id="make_silva_ref")
+        .add_args(silva, silva_tax, vamps_ref, vamps_tax)
+        .add_inputs(silva, silva_tax)
+        .add_outputs(vamps_ref, vamps_tax, stage_out=True, register_replica=True)
+    )
+    wf.add_jobs(ref_job)
     geochem = refs["geochem"]
 
     # === 16S TRACK ============================================================
@@ -336,8 +351,8 @@ def build_workflow(refs, reads) -> Workflow:
     taxonomy = File("taxonomy.tsv")
     mothur_job = (
         Job("mothur_asv", _id="mothur")
-        .add_args(*cleaned_fastas, silva, asv_table, taxonomy)
-        .add_inputs(*cleaned_fastas, silva)
+        .add_args(*cleaned_fastas, vamps_ref, asv_table, taxonomy)
+        .add_inputs(*cleaned_fastas, vamps_ref, vamps_tax)
         .add_outputs(asv_table, taxonomy, stage_out=True, register_replica=True)
     )
     wf.add_jobs(mothur_job)
@@ -393,8 +408,8 @@ def build_workflow(refs, reads) -> Workflow:
         enz = File(f"{name}_enzymes.tsv")
         mif_job = (
             Job("mifaser", _id=f"mifaser_{name}")
-            .add_args(t1, t2, gsplus, enz)
-            .add_inputs(t1, t2, gsplus)
+            .add_args(t1, t2, enz)
+            .add_inputs(t1, t2)
             .add_outputs(enz, stage_out=False, register_replica=False)
         )
         wf.add_jobs(mif_job)
@@ -473,6 +488,9 @@ def main():
     ap = argparse.ArgumentParser(description="Build the SubductCR Pegasus workflow.")
     ap.add_argument("--no-run", action="store_true",
                     help="write workflow.yml + catalogs only; do not plan/submit")
+    ap.add_argument("--plan-only", action="store_true",
+                    help="plan into an executable workflow but do NOT submit "
+                         "(inspect it before running)")
     args = ap.parse_args()
 
     build_properties()
@@ -492,16 +510,25 @@ def main():
         print("Wrote workflow.yml, properties, and catalogs. Skipping plan/run.")
         return
 
-    # Plan the abstract workflow into an executable one and submit it.
+    # Plan the abstract workflow into an executable one.
+    # submit=False (--plan-only) plans and validates but does not hand the DAG
+    # to HTCondor, so you can inspect the run dir before committing jobs.
     # To enable horizontal clustering, add clusters.size profiles to the
     # per-sample Transformations and pass cluster=["horizontal"] here.
-    wf.plan(
+    submit = not args.plan_only
+    plan = wf.plan(
         dir=str(WORK),
         sites=["condorpool"],
         output_sites=["local"],
-        submit=True,
-    ).wait()
+        submit=submit,
+    )
 
+    if args.plan_only:
+        print("Planned (not submitted). Inspect the run directory above, then "
+              "submit with:  pegasus-run <run-dir>")
+        return
+
+    plan.wait()
     wf.statistics()
 
 
