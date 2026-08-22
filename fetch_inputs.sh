@@ -15,6 +15,7 @@
 #   ./fetch_inputs.sh --skip-reads    # skip the big SRA downloads
 #   ./fetch_inputs.sh --only silva    # one of: silva|gsplus|tables|reads
 #   ./fetch_inputs.sh --threads 8
+#   ./fetch_inputs.sh --no-install   # do not auto-install sra-tools/edirect
 #
 # Prereqs (install/module-load first):
 #   wget or curl, tar
@@ -25,13 +26,14 @@
 set -euo pipefail
 
 THREADS=4
-DO_SILVA=1; DO_GSPLUS=1; DO_TABLES=1; DO_READS=1
+DO_SILVA=1; DO_GSPLUS=1; DO_TABLES=1; DO_READS=1; DO_INSTALL=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --threads) THREADS="$2"; shift 2;;
     --skip-reads) DO_READS=0; shift;;
     --skip-silva) DO_SILVA=0; shift;;
     --skip-gsplus) DO_GSPLUS=0; shift;;
+    --no-install) DO_INSTALL=0; shift;;
     --only) DO_SILVA=0; DO_GSPLUS=0; DO_TABLES=0; DO_READS=0
             case "$2" in
               silva) DO_SILVA=1;; gsplus) DO_GSPLUS=1;;
@@ -57,6 +59,59 @@ dl(){ # dl URL OUTFILE
   if have wget; then wget -c -O "$2" "$1";
   elif have curl; then curl -L -C - -o "$2" "$1";
   else echo "ERROR: need wget or curl"; exit 1; fi
+}
+
+TOOLS="$ROOT/tools"          # self-contained tool install dir
+ENVSH="$TOOLS/env.sh"        # source this to get the tools on PATH later
+mkdir -p "$TOOLS"
+
+persist_path(){ # persist_path DIR  -> append to tools/env.sh once
+  local d="$1"
+  touch "$ENVSH"
+  grep -qsF "$d" "$ENVSH" || echo "export PATH=\"$d:\$PATH\"" >> "$ENVSH"
+  export PATH="$d:$PATH"
+}
+
+install_sra_tools(){
+  have prefetch && have fasterq-dump && return 0
+  echo "    installing SRA Toolkit into $TOOLS ..."
+  local os plat
+  os="$(uname -s)"
+  case "$os" in
+    Linux)  plat="sratoolkit.current-centos_linux64" ;;
+    Darwin) plat="sratoolkit.current-mac64" ;;
+    *) echo "    ERROR: unsupported OS $os for auto-install"; return 1 ;;
+  esac
+  local url="https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/current/${plat}.tar.gz"
+  local tgz="$TOOLS/${plat}.tar.gz"
+  dl "$url" "$tgz"
+  tar xzf "$tgz" -C "$TOOLS"
+  local bin; bin="$(ls -d "$TOOLS"/sratoolkit.*/bin 2>/dev/null | head -1)"
+  [[ -n "$bin" ]] || { echo "    ERROR: sra-tools bin not found after extract"; return 1; }
+  persist_path "$bin"
+  # non-interactive config; cache under scratch-friendly tools dir
+  mkdir -p "$TOOLS/ncbi"
+  vdb-config --set "/repository/user/main/public/root=$TOOLS/ncbi" >/dev/null 2>&1 || true
+  vdb-config --set "/repository/user/cache-disabled=false" >/dev/null 2>&1 || true
+  have prefetch && echo "    sra-tools OK ($(prefetch --version 2>/dev/null | head -1))"
+}
+
+install_edirect(){
+  have esearch && have efetch && return 0
+  echo "    installing EDirect into $HOME/edirect ..."
+  if have wget; then
+    sh -c "$(wget -q https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh -O -)" </dev/null >/dev/null 2>&1 || true
+  elif have curl; then
+    sh -c "$(curl -fsSL https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh)" </dev/null >/dev/null 2>&1 || true
+  fi
+  [[ -d "$HOME/edirect" ]] && persist_path "$HOME/edirect"
+  have esearch && echo "    edirect OK" || echo "    WARN: edirect install may have failed"
+}
+
+ensure_read_tools(){
+  if [[ $DO_INSTALL -eq 0 ]]; then return 0; fi
+  install_sra_tools || true
+  install_edirect || true
 }
 
 # ---------------------------------------------------------------------
@@ -149,7 +204,8 @@ fetch_project(){ # fetch_project BIOPROJECT SUFFIX(16S|MG)
 }
 
 if [[ $DO_READS -eq 1 ]]; then
-  have prefetch && have fasterq-dump || { echo "ERROR: sra-tools (prefetch, fasterq-dump) required for --reads"; exit 1; }
+  ensure_read_tools
+  have prefetch && have fasterq-dump || { echo "ERROR: sra-tools (prefetch, fasterq-dump) required for --reads (auto-install failed; install manually or use --no-install)"; exit 1; }
   fetch_project "$BP_16S" "16S"
   fetch_project "$BP_MG"  "MG"
   echo "    NOTE: verify the SRA->sample mapping above; SRA metadata field names"
