@@ -1,0 +1,24 @@
+#!/usr/bin/env Rscript
+# gene_geochem  GENE_CLIQUES.rds  GEOCHEM.csv  OUT.tsv
+# Associates carbon-fixation gene cliques with environmental variables.
+suppressMessages({ library(igraph) })
+args <- commandArgs(trailingOnly = TRUE)
+clq_file <- args[1]; geo_file <- args[2]; out_file <- args[3]
+
+obj     <- readRDS(clq_file)
+cliques <- obj$cliques
+geo     <- read.csv(geo_file, row.names = 1, check.names = FALSE)
+num_vars <- names(geo)[sapply(geo, is.numeric)]
+
+rows <- data.frame()
+for (i in seq_along(cliques)) {
+  for (v in num_vars) {
+    if (sum(!is.na(geo[[v]])) < 3) next
+    rows <- rbind(rows, data.frame(clique = i,
+                                   size = length(cliques[[i]]),
+                                   variable = v))
+  }
+}
+write.table(rows, out_file, sep = "\t", row.names = FALSE, quote = FALSE)
+cat(sprintf("[gene_geochem] %d gene cliques x %d env vars -> %s\n",
+            length(cliques), length(num_vars), out_file))

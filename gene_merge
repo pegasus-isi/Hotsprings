@@ -1,0 +1,32 @@
+#!/usr/bin/env Rscript
+# gene_merge  EC_CARBON.csv  OUT_GENE_TABLE.tsv  SAMPLE1_enzymes.tsv [SAMPLE2 ...]
+# ---------------------------------------------------------------------------
+# Merges the per-sample mi-faser enzyme counts into one EC x sample table,
+# then keeps only the carbon-fixation ECs listed in EC_CARBON.csv.
+# ---------------------------------------------------------------------------
+args      <- commandArgs(trailingOnly = TRUE)
+ec_file   <- args[1]
+out_file  <- args[2]
+enz_files <- args[-(1:2)]
+
+# carbon-fixation EC numbers of interest
+carbon_ec <- read.csv(ec_file, header = TRUE)[[1]]
+
+# read each sample: expects columns  ec , readcount
+merged <- NULL
+for (f in enz_files) {
+  sample <- sub("_enzymes\\.tsv$", "", basename(f))
+  d <- read.delim(f, header = TRUE)
+  names(d)[1:2] <- c("ec", "readcount")
+  d <- d[, c("ec", "readcount")]
+  names(d)[2] <- sample
+  merged <- if (is.null(merged)) d else merge(merged, d, by = "ec", all = TRUE)
+}
+merged[is.na(merged)] <- 0
+
+# keep only carbon-fixation ECs
+merged <- merged[merged$ec %in% carbon_ec, , drop = FALSE]
+
+write.table(merged, out_file, sep = "\t", row.names = FALSE, quote = FALSE)
+cat(sprintf("[gene_merge] %d carbon ECs x %d samples -> %s\n",
+            nrow(merged), length(enz_files), out_file))

@@ -1,0 +1,45 @@
+#!/usr/bin/env Rscript
+# make_report  ASV_ENV.tsv  GENE_ENV.tsv  NMDS.tsv  ADONIS.tsv  CARBON.tsv  OUT.html
+# ---------------------------------------------------------------------------
+# Assembles a single self-contained HTML report summarizing both tracks.
+# Pure base R + simple HTML — no rmarkdown dependency, so it always runs.
+# ---------------------------------------------------------------------------
+args        <- commandArgs(trailingOnly = TRUE)
+asv_env     <- args[1]
+gene_env    <- args[2]
+nmds_file   <- args[3]
+adonis_file <- args[4]
+carbon_file <- args[5]
+out_file    <- args[6]
+
+read_safe <- function(f) tryCatch(read.delim(f, header = TRUE),
+                                  error = function(e) data.frame())
+
+tab_html <- function(df, n = 15) {
+  if (nrow(df) == 0) return("<p><em>(no rows)</em></p>")
+  df <- head(df, n)
+  rows <- apply(df, 1, function(r)
+    paste0("<tr>", paste0("<td>", r, "</td>", collapse = ""), "</tr>"))
+  hdr  <- paste0("<th>", names(df), "</th>", collapse = "")
+  paste0("<table border=1 cellpadding=4 style='border-collapse:collapse'>",
+         "<tr>", hdr, "</tr>", paste(rows, collapse = ""), "</table>")
+}
+
+html <- paste0(
+  "<html><head><meta charset='utf-8'><title>SubductCR report</title>",
+  "<style>body{font-family:Arial;margin:40px;color:#12283F}",
+  "h1{color:#0E3A6B}h2{color:#1E6FB4;border-bottom:2px solid #A9D6F2}",
+  "td,th{font-size:13px}</style></head><body>",
+  "<h1>SubductCR end-to-end results</h1>",
+  "<p>Reproduced from public data (KEBJ01 16S sequences + ENA metagenomes).</p>",
+
+  "<h2>16S community ordination (NMDS)</h2>", tab_html(read_safe(nmds_file)),
+  "<h2>Environmental drivers (PERMANOVA)</h2>", tab_html(read_safe(adonis_file)),
+  "<h2>ASV clique &ndash; geochemistry</h2>", tab_html(read_safe(asv_env)),
+  "<h2>Carbon-fixation gene clique &ndash; geochemistry</h2>", tab_html(read_safe(gene_env)),
+  "<h2>Carbon flux per site</h2>", tab_html(read_safe(carbon_file)),
+
+  "</body></html>")
+
+writeLines(html, out_file)
+cat(sprintf("[make_report] wrote %s\n", out_file))

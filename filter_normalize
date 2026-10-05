@@ -1,0 +1,76 @@
+#!/usr/bin/env Rscript
+# filter_normalize  ASV_TABLE.tsv  TAXONOMY.tsv  OUT.rds
+# Reads mothur's count_table (compressed "index,abundance" form, # comments),
+# cleans, normalizes, saves a phyloseq object. Robust to a single ASV.
+suppressMessages({ library(phyloseq); library(microbiome) })
+
+args     <- commandArgs(trailingOnly = TRUE)
+asv_file <- args[1]; tax_file <- args[2]; out_file <- args[3]
+
+# ---- read mothur count_table (skip # lines, parse index,abundance cells) ----
+raw <- readLines(asv_file); raw <- raw[!grepl("^#", raw)]
+hdr_i <- grep("Representative_Sequence|^ASV|^OTU", raw)[1]; if (is.na(hdr_i)) hdr_i <- 1
+header <- strsplit(raw[hdr_i], "\t")[[1]]
+body <- raw[(hdr_i + 1):length(raw)]; body <- body[nchar(body) > 0]
+parse_cell <- function(x) if (grepl(",", x)) as.numeric(sub(".*,", "", x)) else suppressWarnings(as.numeric(x))
+ids <- character(0); rows <- list()
+for (line in body) {
+  f <- strsplit(line, "\t")[[1]]; ids <- c(ids, f[1])
+  rows[[length(rows)+1]] <- vapply(f[-1], parse_cell, numeric(1))
+}
+mat <- do.call(rbind, rows); colnames(mat) <- header[-1]; rownames(mat) <- ids
+mat[is.na(mat)] <- 0
+drop <- colnames(mat) %in% c("total","Total"); if (any(drop)) mat <- mat[, !drop, drop=FALSE]
+asv_mat <- mat
+cat(sprintf("[filter_normalize] parsed: %d ASVs x %d samples\n", nrow(asv_mat), ncol(asv_mat)))
+if (nrow(asv_mat) == 0 || ncol(asv_mat) == 0)
+  stop("filter_normalize: parsed table is empty — check asv_table.tsv")
+
+# ---- taxonomy (best effort) ------------------------------------------------
+tax_mat <- matrix("NA", nrow=nrow(asv_mat), ncol=6,
+                  dimnames=list(rownames(asv_mat),
+                                c("Domain","Phylum","Class","Order","Family","Genus")))
+tt <- tryCatch(read.delim(tax_file, header=TRUE, check.names=FALSE), error=function(e) NULL)
+if (!is.null(tt) && ncol(tt) >= 2) {
+  rownames(tt) <- tt[[1]]; tt <- tt[, -1, drop=FALSE]
+  common <- intersect(rownames(asv_mat), rownames(tt))
+  if (length(common) > 0) {
+    for (id in common) {
+      v <- as.character(unlist(tt[id, ]))
+      tax_mat[id, seq_len(min(6, length(v)))] <- v[seq_len(min(6, length(v)))]
+    }
+  }
+}
+
+# ---- build phyloseq (guard against zero dims) ------------------------------
+if (nrow(asv_mat) < 1 || ncol(asv_mat) < 1)
+  stop("filter_normalize: nothing to build a phyloseq from")
+physeq <- phyloseq(otu_table(asv_mat, taxa_are_rows=TRUE), tax_table(tax_mat))
+
+# ---- contaminant removal — but NEVER empty the table -----------------------
+contaminants <- c("Afipia","Aquabacterium","Asticcacaulis","Aurantimonas",
+                  "Beijerinckia","Bosea","Bradyrhizobium","Brevundimonas",
+                  "Caulobacter","Craurococcus","Devosia","Hoeflea",
+                  "Mesorhizobium","Methylobacterium","Novosphingobium",
+                  "Ochrobactrum","Paracoccus","Pedomicrobium",
+                  "Phyllobacterium","Rhizobium","Roseomonas","Sphingobium",
+                  "Sphingomonas","Sphingopyxis")
+if ("Genus" %in% colnames(tax_table(physeq))) {
+  genus <- as.character(tax_table(physeq)[, "Genus"])
+  keep  <- is.na(genus) | genus=="NA" | !(genus %in% contaminants)
+  if (sum(keep) >= 1 && sum(keep) < ntaxa(physeq)) physeq <- prune_taxa(keep, physeq)
+}
+
+# ---- rare-ASV filter — only if it leaves at least 1 ASV --------------------
+if (ntaxa(physeq) > 2) {
+  flt <- tryCatch(filter_taxa(physeq, function(x) sum(x > 0) >= 2, prune=TRUE),
+                  error=function(e) physeq)
+  if (ntaxa(flt) >= 1) physeq <- flt
+}
+
+# ---- normalize (guard divide-by-zero) --------------------------------------
+physeq_rel <- transform_sample_counts(physeq, function(x){ s<-sum(x); if (s>0) x/s else x })
+
+saveRDS(physeq_rel, out_file)
+cat(sprintf("[filter_normalize] %d ASVs x %d samples -> %s\n",
+            ntaxa(physeq_rel), nsamples(physeq_rel), out_file))
