@@ -20,6 +20,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S16="$ROOT/data/16s"; MG="$ROOT/data/metagenome"; REF="$ROOT/data/reference"
 CFG="$ROOT/config"
+SRCREF="$ROOT/reference_data"
 mkdir -p "$S16" "$MG" "$REF"
 
 PROJECT="PRJNA627197"
@@ -113,40 +114,36 @@ get_reads() {
 }
 
 build_geochem() {
-  log "Building sample-indexed environmental tables"
-  # join station-level geochem + cell counts onto each sample via the map
-  python3 - "$CFG/sample_station_map.tsv" \
-             "$REF/geochem_by_station.csv" \
-             "$REF/cell_counts_by_station.csv" \
-             "$REF/geochem.csv" "$REF/cell_counts.csv" <<'PY'
+  log "Staging bundled environmental and carbon tables"
+  if [ -f "$SRCREF/ec_carbon.csv" ]; then
+    cp "$SRCREF/ec_carbon.csv" "$REF/ec_carbon.csv"
+    ok "ec_carbon.csv"
+  else
+    note "MISSING reference_data/ec_carbon.csv"
+  fi
+  if [ ! -f "$SRCREF/geochem.csv" ]; then
+    note "MISSING reference_data/geochem.csv"
+    return
+  fi
+  cp "$SRCREF/geochem.csv" "$REF/geochem.csv"
+  python3 - "$SRCREF/geochem.csv" "$REF/cell_counts.csv" <<'PY'
 import sys, csv
-mapf, geof, cellf, geo_out, cell_out = sys.argv[1:6]
-# sample -> station
-smap = {}
-with open(mapf) as f:
-    r=csv.DictReader(f,delimiter="\t")
-    for row in r: smap[row["sample"]] = row["station"]
-def load(path,key="station"):
-    d={}
-    with open(path) as f:
-        r=csv.DictReader(f)
-        for row in r: d[row[key]] = row
-    return r.fieldnames, d
-gcols, geo = load(geof)
-ccols, cell = load(cellf)
-# write geochem.csv indexed by sample
-with open(geo_out,"w",newline="") as f:
-    w=csv.writer(f); w.writerow(["sample"]+[c for c in gcols if c!="station"])
-    miss=[]
-    for s,st in smap.items():
-        if st in geo: w.writerow([s]+[geo[st][c] for c in gcols if c!="station"])
-        else: miss.append(s)
-    if miss: sys.stderr.write("  no geochem for: %s\n" % " ".join(miss))
-with open(cell_out,"w",newline="") as f:
-    w=csv.writer(f); w.writerow(["sample"]+[c for c in ccols if c!="station"])
-    for s,st in smap.items():
-        if st in cell: w.writerow([s]+[cell[st][c] for c in ccols if c!="station"])
-print("  wrote geochem.csv + cell_counts.csv (sample-indexed)")
+src, out = sys.argv[1:3]
+with open(src, newline="") as fi, open(out, "w", newline="") as fo:
+    r = csv.DictReader(fi)
+    if not r.fieldnames:
+        raise SystemExit("geochem.csv has no header")
+    sample_col = "sample" if "sample" in r.fieldnames else r.fieldnames[0]
+    cell_col = next((c for c in r.fieldnames if c.lower() == "cells_flu"), None)
+    if cell_col is None:
+        cell_col = next((c for c in r.fieldnames if "cell" in c.lower()), None)
+    if cell_col is None:
+        raise SystemExit("no cell-count column found in geochem.csv")
+    w = csv.writer(fo)
+    w.writerow(["sample", "cells_per_ml"])
+    for row in r:
+        w.writerow([row[sample_col], row[cell_col]])
+print("  wrote geochem.csv + cell_counts.csv from reference_data/geochem.csv")
 PY
   ok "geochem.csv + cell_counts.csv"
 }

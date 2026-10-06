@@ -28,6 +28,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${1:-}"                                   # optional existing data folder
 CHECK_ONLY=0; [ "${2:-}" = "--check" ] && CHECK_ONLY=1
 MG="$ROOT/data/metagenome"; S16="$ROOT/data/16s"; REF="$ROOT/data/reference"
+SRCREF="$ROOT/reference_data"
 mkdir -p "$MG" "$S16" "$REF"
 
 log(){ printf '\n\033[1;34m== %s\033[0m\n' "$*"; }
@@ -163,17 +164,20 @@ prepare_silva() {
 # =============================================================================
 prepare_tables() {
   log "Reference tables"
-  # ec_carbon.csv + the by_station tables ship with the project
-  for f in ec_carbon.csv geochem_by_station.csv cell_counts_by_station.csv; do
-    [ -f "$REF/$f" ] && ok "$f (bundled)" || miss "$f missing from project!"
-  done
-  # geochem.csv + cell_counts.csv: take from SRC if present, else build
+  if [ "$CHECK_ONLY" = "0" ]; then
+    stage_bundled_tables
+  else
+    [ -f "$SRCREF/ec_carbon.csv" ] && ok "reference_data/ec_carbon.csv" || miss "reference_data/ec_carbon.csv missing"
+    [ -f "$SRCREF/geochem.csv" ] && ok "reference_data/geochem.csv" || miss "reference_data/geochem.csv missing"
+  fi
+  [ -f "$REF/ec_carbon.csv" ] && ok "ec_carbon.csv (present)" || miss "ec_carbon.csv will be staged from reference_data"
+  # geochem.csv + cell_counts.csv: take from SRC if present, else derive from reference_data/geochem.csv
   for f in geochem.csv cell_counts.csv; do
     if [ -f "$REF/$f" ]; then ok "$f (present)"; continue; fi
     if [ -n "$SRC" ] && [ -f "$SRC/$f" ]; then
       [ "$CHECK_ONLY" = "0" ] && cp "$SRC/$f" "$REF/$f"; ok "$f (from source)"
     else
-      miss "$f will be built from station tables (run: bin/get_data.sh geochem)"
+      miss "$f will be built from reference_data/geochem.csv"
     fi
   done
   # flux_params.yml -> config/
@@ -182,6 +186,38 @@ prepare_tables() {
   else
     [ -f "$ROOT/config/flux_params.yml" ] && ok "flux_params.yml (present)"
   fi
+  if [ "$CHECK_ONLY" = "0" ]; then
+    stage_bundled_tables
+  fi
+}
+
+stage_bundled_tables() {
+  if [ -f "$SRCREF/ec_carbon.csv" ]; then
+    cp "$SRCREF/ec_carbon.csv" "$REF/ec_carbon.csv"
+  fi
+  [ -f "$REF/geochem.csv" ] && [ -f "$REF/cell_counts.csv" ] && return 0
+  [ -f "$SRCREF/geochem.csv" ] || return 0
+  cp "$SRCREF/geochem.csv" "$REF/geochem.csv"
+  python3 - "$SRCREF/geochem.csv" "$REF/cell_counts.csv" <<'PY'
+import sys,csv
+src,out=sys.argv[1:3]
+with open(src,newline="") as fi, open(out,"w",newline="") as fo:
+    r=csv.DictReader(fi)
+    if not r.fieldnames:
+        raise SystemExit("geochem.csv has no header")
+    sample_col="sample" if "sample" in r.fieldnames else r.fieldnames[0]
+    cell_col=next((c for c in r.fieldnames if c.lower()=="cells_flu"), None)
+    if cell_col is None:
+        cell_col=next((c for c in r.fieldnames if "cell" in c.lower()), None)
+    if cell_col is None:
+        raise SystemExit("no cell-count column found in geochem.csv")
+    w=csv.writer(fo)
+    w.writerow(["sample","cells_per_ml"])
+    for row in r:
+        w.writerow([row[sample_col],row[cell_col]])
+print("   staged geochem.csv + cell_counts.csv from reference_data")
+PY
+  ok "staged bundled geochemistry and cell counts"
 }
 
 # =============================================================================

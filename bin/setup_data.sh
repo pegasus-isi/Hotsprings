@@ -35,6 +35,7 @@ fi
 
 MG="$ROOT/data/metagenome"; S16="$ROOT/data/16s"; REF="$ROOT/data/reference"
 CFG="$ROOT/config"
+SRCREF="$ROOT/reference_data"
 mkdir -p "$MG" "$S16" "$REF" "$CFG"
 
 PROJECT="PRJNA627197"
@@ -181,48 +182,53 @@ do_silva() {
 # =============================================================================
 do_tables() {
   c_hd "Reference tables"
-  # bundled with the project (must exist)
-  for f in ec_carbon.csv geochem_by_station.csv cell_counts_by_station.csv; do
-    valid "$REF/$f" && c_ok "$f (bundled)" || c_er "$f MISSING from project — re-add it"
-  done
-  # geochem.csv / cell_counts.csv : from source, else build from station tables
+  if [ "$CHECK_ONLY" = "0" ]; then
+    stage_bundled_tables
+  else
+    valid "$SRCREF/ec_carbon.csv" && c_ok "reference_data/ec_carbon.csv" || c_er "reference_data/ec_carbon.csv MISSING"
+    valid "$SRCREF/geochem.csv" && c_ok "reference_data/geochem.csv" || c_er "reference_data/geochem.csv MISSING"
+  fi
+  valid "$REF/ec_carbon.csv" && c_ok "ec_carbon.csv" || c_no "ec_carbon.csv will be staged from reference_data"
+  # geochem.csv / cell_counts.csv : from source, else derive from reference_data
   for f in geochem.csv cell_counts.csv; do
     if valid "$REF/$f"; then c_ok "$f"; continue; fi
     if [ -n "$SRC" ] && valid "$SRC/$f"; then place "$SRC/$f" "$REF/$f"; c_mv "$f (from source)"
-    else c_no "$f will be built from station tables"; fi
+    else c_no "$f will be built from reference_data/geochem.csv"; fi
   done
   # flux_params.yml -> config/
   if valid "$CFG/flux_params.yml"; then c_ok "flux_params.yml"
   elif [ -n "$SRC" ] && valid "$SRC/flux_params.yml"; then place "$SRC/flux_params.yml" "$CFG/flux_params.yml"; c_mv "flux_params.yml (from source)"
   else c_no "flux_params.yml missing"; fi
-  # build sample-indexed env tables if needed
-  if [ "$CHECK_ONLY" = "0" ] && { [ ! -f "$REF/geochem.csv" ] || [ ! -f "$REF/cell_counts.csv" ]; }; then
-    build_env
-  fi
+  [ "$CHECK_ONLY" = "0" ] && stage_bundled_tables
 }
 
-build_env() {
-  [ -f "$REF/geochem_by_station.csv" ] || return 0
-  [ -f "$CFG/sample_station_map.tsv" ] || return 0
-  python3 - "$CFG/sample_station_map.tsv" "$REF/geochem_by_station.csv" \
-             "$REF/cell_counts_by_station.csv" "$REF/geochem.csv" "$REF/cell_counts.csv" <<'PY'
+stage_bundled_tables() {
+  if valid "$SRCREF/ec_carbon.csv"; then
+    cp "$SRCREF/ec_carbon.csv" "$REF/ec_carbon.csv"
+  fi
+  [ -f "$REF/geochem.csv" ] && [ -f "$REF/cell_counts.csv" ] && return 0
+  valid "$SRCREF/geochem.csv" || return 0
+  cp "$SRCREF/geochem.csv" "$REF/geochem.csv"
+  python3 - "$SRCREF/geochem.csv" "$REF/cell_counts.csv" <<'PY'
 import sys,csv
-mapf,geof,cellf,go,co=sys.argv[1:6]
-sm={r["sample"]:r["station"] for r in csv.DictReader(open(mapf),delimiter="\t")}
-def load(p):
-    r=csv.DictReader(open(p));return r.fieldnames,{x["station"]:x for x in r}
-gc,geo=load(geof);cc,cell=load(cellf)
-with open(go,"w",newline="") as f:
-    w=csv.writer(f);w.writerow(["sample"]+[c for c in gc if c!="station"])
-    for s,st in sm.items():
-        if st in geo: w.writerow([s]+[geo[st][c] for c in gc if c!="station"])
-with open(co,"w",newline="") as f:
-    w=csv.writer(f);w.writerow(["sample"]+[c for c in cc if c!="station"])
-    for s,st in sm.items():
-        if st in cell: w.writerow([s]+[cell[st][c] for c in cc if c!="station"])
-print("   built geochem.csv + cell_counts.csv (sample-indexed)")
+src,out=sys.argv[1:3]
+with open(src,newline="") as fi, open(out,"w",newline="") as fo:
+    r=csv.DictReader(fi)
+    if not r.fieldnames:
+        raise SystemExit("geochem.csv has no header")
+    sample_col="sample" if "sample" in r.fieldnames else r.fieldnames[0]
+    cell_col=next((c for c in r.fieldnames if c.lower()=="cells_flu"), None)
+    if cell_col is None:
+        cell_col=next((c for c in r.fieldnames if "cell" in c.lower()), None)
+    if cell_col is None:
+        raise SystemExit("no cell-count column found in geochem.csv")
+    w=csv.writer(fo)
+    w.writerow(["sample","cells_per_ml"])
+    for row in r:
+        w.writerow([row[sample_col],row[cell_col]])
+print("   staged geochem.csv + cell_counts.csv from reference_data")
 PY
-  c_ok "built sample-indexed env tables"
+  c_ok "staged bundled geochemistry and cell counts"
 }
 
 # =============================================================================
