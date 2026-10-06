@@ -16,6 +16,8 @@ data. Developed in collaboration with the original authors.
 MG  track :  ENA metagenome reads         ─┘
 ```
 
+![SubductCR Pegasus workflow DAG](docs/workflow_dag.png)
+
 The 16S branch starts from the processed 16S sequences at NCBI (KEBJ01) — no
 raw reads needed. SILVA is used directly from mothur. The metagenome branch
 processes the ENA reads through enzyme annotation.
