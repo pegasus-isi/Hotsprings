@@ -1,8 +1,28 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+
+# Local data and Pegasus run state
+data/
+input/
+runs/
 work/
 output/
+wf-output/
+wf-scratch/
+.pegasus*
+logs/
+condologs/
+*.log
+*.out
+*.err
+
+# Generated Pegasus catalogs and rendered DAGs
 *.yml
+!config/*.yml
 !input/*.yml
 !reference_data/**
+!nersc-perlmutter.yml
 transformations.yml
 replicas.yml
 sites.yml
@@ -10,4 +30,3 @@ properties
 workflow.yml
 subductcr_dag.*
 *.dot
-__pycache__/

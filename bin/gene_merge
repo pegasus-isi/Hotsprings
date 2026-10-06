@@ -1,24 +1,32 @@
 #!/usr/bin/env Rscript
-# gene_merge  s1_enzymes.tsv [s2_enzymes.tsv ...]  GENE_TABLE.tsv
-# Merges per-sample mi-faser EC->readcount tables into an EC x sample matrix,
-# normalises each sample to library size x median (as in the 16S normalisation).
-a <- commandArgs(trailingOnly=TRUE)
-out <- a[length(a)]; ins <- a[-length(a)]
+# gene_merge  EC_CARBON.csv  OUT_GENE_TABLE.tsv  SAMPLE1_enzymes.tsv [SAMPLE2 ...]
+# ---------------------------------------------------------------------------
+# Merges the per-sample mi-faser enzyme counts into one EC x sample table,
+# then keeps only the carbon-fixation ECs listed in EC_CARBON.csv.
+# ---------------------------------------------------------------------------
+args      <- commandArgs(trailingOnly = TRUE)
+ec_file   <- args[1]
+out_file  <- args[2]
+enz_files <- args[-(1:2)]
+
+# carbon-fixation EC numbers of interest
+carbon_ec <- read.csv(ec_file, header = TRUE)[[1]]
+
+# read each sample: expects columns  ec , readcount
 merged <- NULL
-for (f in ins) {
-  s <- sub("_enzymes\\.tsv$","", basename(f))
-  d <- read.csv(f, sep="\t", header=TRUE, check.names=FALSE)
-  # expect columns EC/ec and count/readcount (mi-faser analysis.tsv)
-  names(d) <- tolower(names(d))
-  ec_col <- grep("^ec", names(d), value=TRUE)[1]
-  ct_col <- grep("count", names(d), value=TRUE)[1]
-  d <- d[, c(ec_col, ct_col)]; names(d) <- c("EC", s)
-  merged <- if (is.null(merged)) d else merge(merged, d, by="EC", all=TRUE)
+for (f in enz_files) {
+  sample <- sub("_enzymes\\.tsv$", "", basename(f))
+  d <- read.delim(f, header = TRUE)
+  names(d)[1:2] <- c("ec", "readcount")
+  d <- d[, c("ec", "readcount")]
+  names(d)[2] <- sample
+  merged <- if (is.null(merged)) d else merge(merged, d, by = "ec", all = TRUE)
 }
-rownames(merged) <- merged$EC; merged$EC <- NULL
 merged[is.na(merged)] <- 0
-med <- median(colSums(merged))
-norm <- sweep(merged, 2, colSums(merged), "/") * med    # rel. abund x median
-write.table(data.frame(EC=rownames(norm), norm, check.names=FALSE),
-            out, sep="\t", row.names=FALSE, quote=FALSE)
-cat("[gene_merge] ECs:", nrow(norm), " samples:", ncol(norm), "\n")
+
+# keep only carbon-fixation ECs
+merged <- merged[merged$ec %in% carbon_ec, , drop = FALSE]
+
+write.table(merged, out_file, sep = "\t", row.names = FALSE, quote = FALSE)
+cat(sprintf("[gene_merge] %d carbon ECs x %d samples -> %s\n",
+            nrow(merged), length(enz_files), out_file))

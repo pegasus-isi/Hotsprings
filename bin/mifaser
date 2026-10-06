@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# mifaser  R1.trim.fq.gz  R2.trim.fq.gz  ENZYME_ABUND.tsv
-# Annotates reads to EC numbers using mi-faser's built-in Gold-Standard-Plus
-# database (bundled in the container; referenced by name, not a staged file).
+# mifaser  R1.fastq.gz  R2.fastq.gz  OUT_enzymes.tsv
+# Annotates metabolic enzymes (EC + read counts) with mi-faser.
 set -euo pipefail
 R1="$1"; R2="$2"; OUT="$3"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-mifaser -f -1 "$R1" -2 "$R2" -d GS+ -o "$TMP/mif" -c "${PEGASUS_CORES:-8}"
-# mifaser writes analysis.tsv with EC \t count
-cp "$TMP/mif/analysis.tsv" "$OUT"
+CORES="${PEGASUS_CORES:-8}"
+
+# resolve inputs + output to ABSOLUTE paths (mifaser cds into /app, so relative
+# paths from the Pegasus working dir would not be found).
+R1="$(readlink -f "$R1")"
+R2="$(readlink -f "$R2")"
+OUTDIR="$(cd "$(dirname "$OUT")" && pwd)"; OUT="$OUTDIR/$(basename "$OUT")"
+
+WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+cd /app && python3 -m mifaser -l "$R1" "$R2" -d GS+ -o "$WORK/out" -t "$CORES"
+
+# mi-faser writes analysis.tsv (ec, count); normalize header -> ec, readcount
+awk 'BEGIN{OFS="\t"; print "ec","readcount"} NR>1{print $1,$2}' \
+    "$WORK/out/analysis.tsv" > "$OUT"
 echo "[mifaser] wrote $OUT"

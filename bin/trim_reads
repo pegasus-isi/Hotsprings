@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# trim_reads  R1.fastq.gz  R2.fastq.gz  OUT_R1.fq.gz  OUT_R2.fq.gz
+# trim_reads  IN_R1.fastq.gz  IN_R2.fastq.gz  OUT_R1.fastq.gz  OUT_R2.fastq.gz
+# Quality-trims the staged paired reads (trimmomatic).
 set -euo pipefail
-R1="$1"; R2="$2"; O1="$3"; O2="$4"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-trimmomatic PE -threads "${PEGASUS_CORES:-4}" \
-  "$R1" "$R2" \
-  "$O1" "$TMP/u1.fq.gz" \
-  "$O2" "$TMP/u2.fq.gz" \
-  LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:50
-echo "[trim_reads] wrote $O1 $O2"
+IN1="$1"; IN2="$2"; OUT1="$3"; OUT2="$4"
+CORES="${PEGASUS_CORES:-4}"
+trimmomatic PE -threads "$CORES" \
+  "$IN1" "$IN2" "$OUT1" /dev/null "$OUT2" /dev/null \
+  SLIDINGWINDOW:4:20 MINLEN:50
+echo "[trim_reads] wrote $OUT1 + $OUT2"

@@ -1,9 +1,8 @@
-# mothur 1.48.0 via bioconda -> clean, pinned tag (no biocontainers hash-roulette).
-# Build for the cluster arch:  docker build --platform linux/amd64 ...
-FROM mambaorg/micromamba:1.5.10
-USER root
-RUN micromamba install -y -n base -c conda-forge -c bioconda mothur=1.48.0 \
-    && micromamba clean -a -y
-ENV PATH=/opt/conda/bin:$PATH
-# sanity check at build time
-RUN mothur "#quit()" >/dev/null 2>&1 || mothur --version || true
+# mothur + trimmomatic for the 16S ASV and read-trimming steps.
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        mothur trimmomatic python3 wget ca-certificates \
+    && ln -sf /usr/share/java/trimmomatic.jar /usr/local/bin/trimmomatic.jar \
+    && printf '#!/bin/bash\njava -jar /usr/local/bin/trimmomatic.jar "$@"\n' > /usr/local/bin/trimmomatic \
+    && chmod +x /usr/local/bin/trimmomatic \
+    && rm -rf /var/lib/apt/lists/*

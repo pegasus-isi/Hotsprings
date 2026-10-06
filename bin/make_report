@@ -1,27 +1,45 @@
 #!/usr/bin/env Rscript
-# make_report  ASV_CLIQUE_ENV.tsv  GENE_CLIQUE_ENV.tsv  NMDS.tsv  ADONIS.tsv  FIG2.pdf  FLUX.tsv  REPORT.html
-a <- commandArgs(trailingOnly=TRUE)
-asv <- a[1]; gene <- a[2]; nmds <- a[3]; adonis <- a[4]; fig <- a[5]; flux <- a[6]; out <- a[7]
-rd <- function(f) if (file.exists(f)) read.delim(f, check.names=FALSE) else data.frame(note="missing")
-tbl <- function(d, n=15) {
-  d <- head(d, n)
-  paste0("<table border='1' cellpadding='4' style='border-collapse:collapse'><tr>",
-    paste0("<th>", names(d), "</th>", collapse=""), "</tr>",
-    paste0(apply(d, 1, function(r) paste0("<tr>", paste0("<td>", r, "</td>", collapse=""), "</tr>")), collapse=""),
-    "</table>")
+# make_report  ASV_ENV.tsv  GENE_ENV.tsv  NMDS.tsv  ADONIS.tsv  CARBON.tsv  OUT.html
+# ---------------------------------------------------------------------------
+# Assembles a single self-contained HTML report summarizing both tracks.
+# Pure base R + simple HTML — no rmarkdown dependency, so it always runs.
+# ---------------------------------------------------------------------------
+args        <- commandArgs(trailingOnly = TRUE)
+asv_env     <- args[1]
+gene_env    <- args[2]
+nmds_file   <- args[3]
+adonis_file <- args[4]
+carbon_file <- args[5]
+out_file    <- args[6]
+
+read_safe <- function(f) tryCatch(read.delim(f, header = TRUE),
+                                  error = function(e) data.frame())
+
+tab_html <- function(df, n = 15) {
+  if (nrow(df) == 0) return("<p><em>(no rows)</em></p>")
+  df <- head(df, n)
+  rows <- apply(df, 1, function(r)
+    paste0("<tr>", paste0("<td>", r, "</td>", collapse = ""), "</tr>"))
+  hdr  <- paste0("<th>", names(df), "</th>", collapse = "")
+  paste0("<table border=1 cellpadding=4 style='border-collapse:collapse'>",
+         "<tr>", hdr, "</tr>", paste(rows, collapse = ""), "</table>")
 }
-flux_d <- rd(flux)
+
 html <- paste0(
-"<html><head><meta charset='utf-8'><title>SubductCR workflow report</title>",
-"<style>body{font-family:sans-serif;max-width:900px;margin:2em auto;line-height:1.6}",
-"h2{border-bottom:2px solid #0F6E56;padding-bottom:4px}</style></head><body>",
-"<h1>SubductCR &mdash; Pegasus workflow report</h1>",
-"<p>Rebuild of Fullerton et al. (2021), <i>Nat. Geosci.</i> pipeline.</p>",
-"<h2>Carbon flux</h2>", tbl(flux_d),
-"<h2>ADONIS (community vs geology factors)</h2>", tbl(rd(adonis)),
-"<h2>ASV clique &ndash; geochemistry (top tests)</h2>", tbl(rd(asv)),
-"<h2>Gene-clique &ndash; geochemistry (top tests)</h2>", tbl(rd(gene)),
-"<h2>Figure 2 &mdash; community NMDS</h2><p>See <code>", basename(fig), "</code>.</p>",
-"</body></html>")
-writeLines(html, out)
-cat("[make_report] wrote", out, "\n")
+  "<html><head><meta charset='utf-8'><title>SubductCR report</title>",
+  "<style>body{font-family:Arial;margin:40px;color:#12283F}",
+  "h1{color:#0E3A6B}h2{color:#1E6FB4;border-bottom:2px solid #A9D6F2}",
+  "td,th{font-size:13px}</style></head><body>",
+  "<h1>SubductCR end-to-end results</h1>",
+  "<p>Reproduced from public data (KEBJ01 16S sequences + ENA metagenomes).</p>",
+
+  "<h2>16S community ordination (NMDS)</h2>", tab_html(read_safe(nmds_file)),
+  "<h2>Environmental drivers (PERMANOVA)</h2>", tab_html(read_safe(adonis_file)),
+  "<h2>ASV clique &ndash; geochemistry</h2>", tab_html(read_safe(asv_env)),
+  "<h2>Carbon-fixation gene clique &ndash; geochemistry</h2>", tab_html(read_safe(gene_env)),
+  "<h2>Carbon flux per site</h2>", tab_html(read_safe(carbon_file)),
+
+  "</body></html>")
+
+writeLines(html, out_file)
+cat(sprintf("[make_report] wrote %s\n", out_file))

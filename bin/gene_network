@@ -1,22 +1,20 @@
 #!/usr/bin/env Rscript
-# gene_network  GENE_TABLE.tsv  GENE_CLIQUES.rds  [EC_LIST_CARBON.csv]
-# Subsets to carbon-metabolism ECs, Spearman network, Louvain gene-cliques
-# (recovers Wood-Ljungdahl / rTCA / Calvin-Benson-Bassham gene-cliques).
-suppressMessages({library(igraph)})
-a <- commandArgs(trailingOnly=TRUE)
-gt <- read.csv(a[1], sep="\t", row.names=1, check.names=FALSE); out <- a[2]
-if (length(a) >= 3 && file.exists(a[3])) {
-  ecs <- read.csv(a[3], header=FALSE)[[1]]
-  gt <- gt[rownames(gt) %in% ecs, , drop=FALSE]
-}
-cc <- cor(t(gt), method="spearman", use="complete.obs")
-cc[is.na(cc)] <- 0
-g <- graph.adjacency(cc, mode="undirected", weighted=TRUE, diag=FALSE)
-g <- igraph::simplify(g)
-g <- delete_edges(g, E(g)[E(g)$weight <= 0.5])          # metagenome: rho>0.5
-g <- delete_vertices(g, V(g)[degree(g) == 0])
-lou <- cluster_louvain(g)
-saveRDS(list(graph=g, membership=membership(lou), matrix=as.matrix(gt),
-             modularity=modularity(lou)), out)
-cat("[gene_network] nodes:", vcount(g), " gene-cliques:", length(lou),
-    " Q:", round(modularity(lou),3), "\n")
+# gene_network  GENE_TABLE.tsv  OUT_CLIQUES.rds
+# Co-occurrence network of carbon-fixation ECs across samples -> cliques.
+suppressMessages({ library(igraph) })
+args <- commandArgs(trailingOnly = TRUE)
+in_file <- args[1]; out_file <- args[2]
+
+d   <- read.delim(in_file, header = TRUE, check.names = FALSE)
+mat <- as.matrix(d[, -1, drop = FALSE])          # rows = ECs, cols = samples
+rownames(mat) <- as.character(d[[1]])
+
+cor_mat <- suppressWarnings(cor(t(mat), method = "spearman"))
+cor_mat[is.na(cor_mat)] <- 0
+adj <- (cor_mat >= 0.7) * 1; diag(adj) <- 0
+
+g <- graph_from_adjacency_matrix(adj, mode = "undirected", diag = FALSE)
+cliques_list <- max_cliques(g, min = 3)
+saveRDS(list(graph = g, cliques = cliques_list), out_file)
+cat(sprintf("[gene_network] %d ECs, %d cliques -> %s\n",
+            vcount(g), length(cliques_list), out_file))

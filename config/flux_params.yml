@@ -1,0 +1,5 @@
+# Carbon-flux model parameters (Fullerton et al. 2021, Methods).
+# Every value is defined; carbon_flux coerces them to numeric.
+fixation_rate_per_cell: 6.3e-15   # mol C per cell per year
+integration_depth_m:    1000      # metres of subsurface integrated
+porosity:               0.1       # pore-space fraction (dimensionless)

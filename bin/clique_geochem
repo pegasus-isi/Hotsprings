@@ -1,40 +1,180 @@
 #!/usr/bin/env Rscript
-# clique_geochem  ASV_CLIQUES.rds  GEOCHEM.csv  ASV_CLIQUE_ENV.tsv
-# For each clique: cumulative abundance vs every environmental predictor via
-# Spearman + Pearson; VSURF random-forest ranking picks the top variable.
-suppressMessages({library(VSURF)})
-a <- commandArgs(trailingOnly=TRUE)
-obj <- readRDS(a[1]); env <- read.csv(a[2], row.names=1, check.names=FALSE); out <- a[3]
 
-m <- obj$matrix; mem <- obj$membership
-num_env <- env[, sapply(env, is.numeric), drop=FALSE]
-samples <- intersect(colnames(m), rownames(num_env))
-m <- m[, samples, drop=FALSE]; num_env <- num_env[samples, , drop=FALSE]
+# clique_geochem CLIQUES.rds FILTERED.rds GEOCHEM.csv OUT.tsv
+# Correlate each ASV clique's mean sample abundance with each numeric
+# environmental variable.
 
-res <- list()
-for (cl in sort(unique(mem))) {
-  members <- names(mem)[mem == cl]
-  ab <- colSums(m[rownames(m) %in% members, , drop=FALSE], na.rm=TRUE)
-  for (v in colnames(num_env)) {
-    x <- num_env[[v]]; ok <- is.finite(x) & is.finite(ab)
-    if (sum(ok) < 4) next
-    sp <- suppressWarnings(cor.test(x[ok], ab[ok], method="spearman"))
-    pe <- suppressWarnings(cor.test(x[ok], ab[ok], method="pearson"))
-    res[[length(res)+1]] <- data.frame(
-      clique=cl, variable=v,
-      spearman_rho=unname(sp$estimate), spearman_p=sp$p.value,
-      pearson_r=unname(pe$estimate),   pearson_p=pe$p.value)
-  }
-  # VSURF: which env variable best explains this clique's abundance
-  df <- na.omit(data.frame(y=ab, num_env))
-  if (nrow(df) >= 8 && ncol(df) > 2) {
-    vs <- try(VSURF(y ~ ., data=df, ntree=500, verbose=FALSE), silent=TRUE)
-    if (!inherits(vs,"try-error") && length(vs$varselect.pred)>0)
-      cat(sprintf("[clique_geochem] clique %d top RF var: %s\n",
-          cl, colnames(df)[-1][vs$varselect.pred[1]]))
-  }
+suppressPackageStartupMessages({
+    library(phyloseq)
+    library(igraph)
+})
+
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) != 4L) {
+    stop(
+        "Usage: clique_geochem CLIQUES.rds FILTERED.rds GEOCHEM.csv OUT.tsv",
+        call. = FALSE
+    )
 }
-tab <- do.call(rbind, res)
-tab$spearman_p_holm <- p.adjust(tab$spearman_p, method="holm")
-write.table(tab, out, sep="\t", row.names=FALSE, quote=FALSE)
-cat("[clique_geochem] wrote", nrow(tab), "clique-variable tests\n")
+
+clique_file   <- args[[1L]]
+filtered_file <- args[[2L]]
+geo_file      <- args[[3L]]
+out_file      <- args[[4L]]
+
+network <- readRDS(clique_file)
+physeq <- readRDS(filtered_file)
+
+if (is.null(network$cliques)) {
+    stop("CLIQUES.rds does not contain a 'cliques' element", call. = FALSE)
+}
+if (!inherits(physeq, "phyloseq")) {
+    stop("FILTERED.rds does not contain a phyloseq object", call. = FALSE)
+}
+
+otu <- otu_table(physeq)
+abund <- as(otu, "matrix")
+if (!taxa_are_rows(otu)) abund <- t(abund)
+
+if (is.null(dim(abund)) || nrow(abund) == 0L || ncol(abund) == 0L) {
+    stop("The abundance matrix has zero ASVs or zero samples", call. = FALSE)
+}
+
+storage.mode(abund) <- "double"
+abund[!is.finite(abund)] <- 0
+
+geo_raw <- read.csv(
+    geo_file,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+)
+
+canonical_id <- function(x) {
+    toupper(gsub("[^A-Z0-9]", "", trimws(as.character(x))))
+}
+
+canonical_columns <- canonical_id(names(geo_raw))
+preferred_id_columns <- c("SAMPLE", "SAMPLEID", "SITE", "SITEID", "ID", "NAME")
+id_column <- match(preferred_id_columns, canonical_columns, nomatch = 0L)
+id_column <- id_column[id_column > 0L]
+if (length(id_column) > 0L) {
+    id_column <- id_column[[1L]]
+} else {
+    id_column <- 1L
+}
+
+geo_ids_raw <- trimws(as.character(geo_raw[[id_column]]))
+embedded_id <- grepl("\\.\\.[^_]+_", geo_ids_raw)
+geo_ids <- geo_ids_raw
+geo_ids[embedded_id] <- sub(
+    "^.*\\.\\.([^_]+)_.*$",
+    "\\1",
+    geo_ids_raw[embedded_id]
+)
+
+geo_keys <- canonical_id(geo_ids)
+sample_ids <- colnames(abund)
+sample_keys <- canonical_id(sample_ids)
+
+if (any(!nzchar(geo_keys)) || anyDuplicated(geo_keys)) {
+    stop("The geochemistry sample column contains blank or duplicate IDs",
+         call. = FALSE)
+}
+
+common_keys <- intersect(sample_keys, geo_keys)
+common_samples <- sample_ids[match(common_keys, sample_keys)]
+if (length(common_samples) < 3L) {
+    stop(
+        paste0(
+            "Fewer than three sample IDs match. Phyloseq samples: ",
+            paste(sample_ids, collapse = ", "),
+            ". Extracted geochemistry IDs: ", paste(geo_ids, collapse = ", ")
+        ),
+        call. = FALSE
+    )
+}
+
+sample_positions <- match(common_keys, sample_keys)
+geo_positions <- match(common_keys, geo_keys)
+abund <- abund[, sample_positions, drop = FALSE]
+geo <- geo_raw[geo_positions, -id_column, drop = FALSE]
+rownames(geo) <- colnames(abund)
+numeric_variables <- names(geo)[vapply(geo, is.numeric, logical(1L))]
+
+message("Matched ", length(common_keys), " samples for clique-geochemistry analysis")
+
+results <- list()
+result_index <- 1L
+
+for (clique_index in seq_along(network$cliques)) {
+    members <- tryCatch(
+        as_ids(network$cliques[[clique_index]]),
+        error = function(e) names(network$cliques[[clique_index]])
+    )
+    members <- intersect(as.character(members), rownames(abund))
+    if (length(members) == 0L) next
+
+    clique_abundance <- colMeans(
+        abund[members, , drop = FALSE],
+        na.rm = TRUE
+    )
+
+    for (variable in numeric_variables) {
+        environmental_value <- geo[[variable]]
+        valid <- is.finite(clique_abundance) & is.finite(environmental_value)
+        if (sum(valid) < 3L) next
+
+        x <- clique_abundance[valid]
+        y <- environmental_value[valid]
+        if (length(unique(x)) < 2L || length(unique(y)) < 2L) next
+
+        test <- suppressWarnings(
+            cor.test(x, y, method = "spearman", exact = FALSE)
+        )
+
+        results[[result_index]] <- data.frame(
+            clique = clique_index,
+            size = length(members),
+            variable = variable,
+            samples = sum(valid),
+            rho = unname(test$estimate),
+            p_value = test$p.value,
+            members = paste(members, collapse = ";"),
+            stringsAsFactors = FALSE
+        )
+        result_index <- result_index + 1L
+    }
+}
+
+if (length(results) == 0L) {
+    output <- data.frame(
+        clique = integer(),
+        size = integer(),
+        variable = character(),
+        samples = integer(),
+        rho = numeric(),
+        p_value = numeric(),
+        q_value = numeric(),
+        members = character()
+    )
+} else {
+    output <- do.call(rbind, results)
+    output$q_value <- p.adjust(output$p_value, method = "BH")
+    output <- output[order(output$q_value, -abs(output$rho)), ]
+}
+
+write.table(
+    output,
+    out_file,
+    sep = "\t",
+    row.names = FALSE,
+    quote = FALSE
+)
+
+cat(sprintf(
+    "[clique_geochem] %d cliques, %d variables, %d tests -> %s\n",
+    length(network$cliques),
+    length(numeric_variables),
+    nrow(output),
+    out_file
+))

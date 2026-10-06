@@ -1,30 +1,287 @@
 #!/usr/bin/env Rscript
-# asv_network  FILTERED.rds  ASV_CLIQUES.rds  ASV_EDGES.tsv
-# Dominant-ASV co-occurrence network: keep ASVs >=20 reads in >=3 samples,
-# Spearman correlations, retain rho>0.7, Louvain community detection.
-suppressMessages({library(phyloseq); library(igraph)})
-a <- commandArgs(trailingOnly=TRUE)
-ps <- readRDS(a[1]); clq_out <- a[2]; edge_out <- a[3]
 
-m <- as(otu_table(ps), "matrix")
-if (!taxa_are_rows(ps)) m <- t(m)                       # taxa as rows
-# prevalence filter: >=20 reads total AND present in >=3 samples
-keep <- rowSums(m) >= 20 & rowSums(m > 0) >= 3
-m <- m[keep, , drop=FALSE]
+# asv_network FILTERED.rds OUT_CLIQUES.rds
+#
+# Build a sparse ASV correlation network from a phyloseq object.  The script
+# first filters ASVs by prevalence, then keeps only the most prevalent/abundant
+# ASVs before constructing the correlation matrix.  This prevents an enormous
+# N x N matrix when the original table contains hundreds of thousands of ASVs.
+#
+# The output is deliberately compatible with the downstream SubductCR job:
+#
+#   list(graph = <igraph object>, cliques = <list of igraph vertex sequences>)
+#
+# Configuration is defined directly below; no environment variables are used.
 
-cc <- cor(t(m), method="spearman", use="pairwise.complete.obs")
-cc[is.na(cc)] <- 0
-g  <- graph.adjacency(cc, mode="undirected", weighted=TRUE, diag=FALSE)
-g  <- igraph::simplify(g)
-g  <- delete_edges(g, E(g)[E(g)$weight <= 0.7])         # keep positive rho>0.7
-g  <- delete_vertices(g, V(g)[degree(g) == 0])
+suppressPackageStartupMessages({
+    if (!requireNamespace("phyloseq", quietly = TRUE)) {
+        stop("The R package 'phyloseq' is required", call. = FALSE)
+    }
+    if (!requireNamespace("igraph", quietly = TRUE)) {
+        stop("The R package 'igraph' is required", call. = FALSE)
+    }
+    library(phyloseq)
+    library(igraph)
+})
 
-lou <- cluster_louvain(g)
-V(g)$clique <- membership(lou)
+fail <- function(...) {
+    message("ERROR: ", paste0(..., collapse = ""))
+    quit(save = "no", status = 1L)
+}
 
-saveRDS(list(graph=g, membership=membership(lou),
-             matrix=m, modularity=modularity(lou)), clq_out)
-ed <- as_data_frame(g, what="edges")
-write.table(ed, edge_out, sep="\t", row.names=FALSE, quote=FALSE)
-cat("[asv_network] nodes:", vcount(g), " edges:", ecount(g),
-    " cliques:", length(lou), " Q:", round(modularity(lou),3), "\n")
+# ---------------------------------------------------------------------------
+# Fixed analysis configuration
+# ---------------------------------------------------------------------------
+MIN_SAMPLES     <- 2L          # ASV must occur in at least two samples
+TOP_K           <- 2000L       # maximum ASVs entering the correlation matrix
+R_THRESH        <- 0.60        # minimum correlation magnitude
+COR_METHOD      <- "spearman"  # "spearman" or "pearson"
+EDGE_MODE       <- "absolute"  # "absolute", "positive", or "negative"
+MIN_CLIQUE_SIZE <- 3L
+MAX_CLIQUES     <- 10000L
+CLIQUE_SECONDS  <- 300
+USE_FDR         <- FALSE
+Q_THRESH        <- 0.05
+
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) != 2L) {
+    fail("usage: asv_network FILTERED.rds OUT_CLIQUES.rds")
+}
+
+input_file  <- normalizePath(args[[1L]], mustWork = FALSE)
+output_file <- normalizePath(args[[2L]], mustWork = FALSE)
+
+if (!file.exists(input_file)) {
+    fail("input file does not exist: ", input_file)
+}
+
+if (!COR_METHOD %in% c("spearman", "pearson")) {
+    fail("COR_METHOD must be 'spearman' or 'pearson'")
+}
+if (!EDGE_MODE %in% c("absolute", "positive", "negative")) {
+    fail("EDGE_MODE must be 'absolute', 'positive', or 'negative'")
+}
+
+message("Reading ", input_file)
+obj <- tryCatch(
+    readRDS(input_file),
+    error = function(e) fail("could not read input RDS: ", conditionMessage(e))
+)
+
+# Accept the expected phyloseq object and plain matrix/data-frame inputs to
+# make the wrapper easier to test. Rows are always converted to ASVs and
+# columns to samples.
+if (inherits(obj, "phyloseq")) {
+    otu <- otu_table(obj)
+    counts <- as(otu, "matrix")
+    if (!taxa_are_rows(otu)) counts <- t(counts)
+} else if (is.matrix(obj) || is.data.frame(obj)) {
+    counts <- as.matrix(obj)
+} else {
+    fail("input must contain a phyloseq object, matrix, or data.frame; found: ",
+         paste(class(obj), collapse = ", "))
+}
+rm(obj)
+
+if (nrow(counts) == 0L || ncol(counts) == 0L) {
+    fail("the ASV table has zero rows or zero samples")
+}
+
+storage.mode(counts) <- "double"
+counts[!is.finite(counts)] <- 0
+if (any(counts < 0)) {
+    fail("the ASV abundance table contains negative values")
+}
+
+if (is.null(rownames(counts))) {
+    rownames(counts) <- sprintf("ASV_%07d", seq_len(nrow(counts)))
+}
+rownames(counts) <- make.unique(as.character(rownames(counts)))
+
+sample_count <- ncol(counts)
+if (MIN_SAMPLES > sample_count) {
+    fail("MIN_SAMPLES=", MIN_SAMPLES,
+         " exceeds the number of samples (", sample_count, ")")
+}
+
+message("Input dimensions: ", nrow(counts), " ASVs x ", sample_count, " samples")
+
+# Filter before correlation.  Both prevalence and total abundance are used in
+# the ordering so that TOP_K is deterministic when prevalence ties occur.
+prevalence_all <- rowSums(counts > 0, na.rm = TRUE)
+message(
+    "Prevalence: >=1 sample: ", sum(prevalence_all >= 1L),
+    "; >=2: ", sum(prevalence_all >= 2L),
+    "; >=3: ", sum(prevalence_all >= 3L)
+)
+eligible <- which(prevalence_all >= MIN_SAMPLES)
+
+if (length(eligible) == 0L) {
+    warning("No ASVs passed the prevalence filter; writing an empty network")
+    result <- list(graph = make_empty_graph(directed = FALSE), cliques = list())
+    dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(result, output_file)
+    quit(save = "no", status = 0L)
+}
+
+abundance_all <- rowSums(counts[eligible, , drop = FALSE], na.rm = TRUE)
+ordering <- order(prevalence_all[eligible], abundance_all, decreasing = TRUE)
+selected <- eligible[ordering[seq_len(min(TOP_K, length(ordering)))]]
+
+counts <- counts[selected, , drop = FALSE]
+prevalence <- prevalence_all[selected]
+abundance <- rowSums(counts, na.rm = TRUE)
+rm(prevalence_all, abundance_all, eligible, ordering, selected)
+gc(verbose = FALSE)
+
+# Constant rows produce NA correlations and cannot contribute useful edges.
+row_variance <- apply(counts, 1L, var, na.rm = TRUE)
+variable <- is.finite(row_variance) & row_variance > 0
+counts <- counts[variable, , drop = FALSE]
+prevalence <- prevalence[variable]
+abundance <- abundance[variable]
+rm(row_variance, variable)
+
+message("Network input: ", nrow(counts), " ASVs after filtering/capping")
+
+if (nrow(counts) == 0L) {
+    warning("No variable ASVs remained; writing an empty network")
+    result <- list(graph = make_empty_graph(directed = FALSE), cliques = list())
+    dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(result, output_file)
+    quit(save = "no", status = 0L)
+}
+
+# log1p reduces extreme abundance leverage for Pearson correlation. It does
+# not change within-ASV ranks and therefore leaves Spearman correlations
+# unchanged.
+network_values <- log1p(counts)
+correlation <- suppressWarnings(cor(
+    t(network_values),
+    method = COR_METHOD,
+    use = "pairwise.complete.obs"
+))
+rm(network_values, counts)
+gc(verbose = FALSE)
+
+correlation[!is.finite(correlation)] <- 0
+diag(correlation) <- 1
+
+# Work only with the upper triangle so every undirected edge is considered
+# exactly once.
+upper_index <- which(upper.tri(correlation), arr.ind = TRUE)
+if (nrow(upper_index) == 0L) {
+    edge_values <- numeric(0)
+    keep_edge <- logical(0)
+    q_values <- numeric(0)
+} else {
+    edge_values <- correlation[upper_index]
+    keep_edge <- switch(
+        EDGE_MODE,
+        absolute = abs(edge_values) >= R_THRESH,
+        positive = edge_values >= R_THRESH,
+        negative = edge_values <= -R_THRESH
+    )
+
+    q_values <- rep(NA_real_, length(edge_values))
+    if (USE_FDR) {
+        # Approximate two-sided significance test. This is exact for Pearson
+        # under the usual assumptions and a common large-sample approximation
+        # for Spearman correlation.
+        degrees_freedom <- sample_count - 2L
+        if (degrees_freedom <= 0L) {
+            fail("FDR filtering requires at least three samples")
+        }
+        safe_r <- pmin(abs(edge_values), 1 - .Machine$double.eps)
+        t_stat <- safe_r * sqrt(degrees_freedom / pmax(1 - safe_r^2,
+                                                       .Machine$double.eps))
+        p_values <- 2 * pt(-abs(t_stat), df = degrees_freedom)
+        q_values <- p.adjust(p_values, method = "BH")
+        keep_edge <- keep_edge & q_values <= Q_THRESH
+        rm(safe_r, t_stat, p_values)
+    }
+}
+
+vertex_table <- data.frame(
+    name = rownames(correlation),
+    prevalence = as.integer(prevalence),
+    abundance = as.numeric(abundance),
+    stringsAsFactors = FALSE
+)
+
+if (any(keep_edge)) {
+    kept_index <- upper_index[keep_edge, , drop = FALSE]
+    kept_r <- edge_values[keep_edge]
+    edge_table <- data.frame(
+        from = rownames(correlation)[kept_index[, 1L]],
+        to = colnames(correlation)[kept_index[, 2L]],
+        correlation = kept_r,
+        weight = abs(kept_r),
+        sign = ifelse(kept_r >= 0, "positive", "negative"),
+        stringsAsFactors = FALSE
+    )
+    if (USE_FDR) edge_table$q_value <- q_values[keep_edge]
+    graph <- graph_from_data_frame(edge_table, directed = FALSE,
+                                   vertices = vertex_table)
+} else {
+    graph <- make_empty_graph(n = nrow(vertex_table), directed = FALSE)
+    V(graph)$name <- vertex_table$name
+    V(graph)$prevalence <- vertex_table$prevalence
+    V(graph)$abundance <- vertex_table$abundance
+}
+
+rm(correlation, upper_index, edge_values, keep_edge, q_values)
+gc(verbose = FALSE)
+
+message("Graph: ", vcount(graph), " vertices, ", ecount(graph), " edges")
+
+# Enumerating maximal cliques can grow exponentially. Apply a time limit and
+# fall back to the largest cliques if full enumeration is too expensive.
+cliques <- list()
+active_vertices <- V(graph)[degree(graph) > 0]
+if (length(active_vertices) >= MIN_CLIQUE_SIZE) {
+    active_graph <- induced_subgraph(graph, active_vertices)
+    cliques <- tryCatch(
+        {
+            setTimeLimit(elapsed = CLIQUE_SECONDS, transient = TRUE)
+            max_cliques(active_graph, min = MIN_CLIQUE_SIZE)
+        },
+        error = function(e) {
+            setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+            warning("Maximal-clique enumeration stopped: ", conditionMessage(e),
+                    "; saving the largest cliques instead")
+            largest_cliques(active_graph)
+        },
+        finally = setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+    )
+
+    # Do not keep size-one/two fallbacks when the configured minimum is larger.
+    cliques <- cliques[vapply(cliques, length, integer(1L)) >= MIN_CLIQUE_SIZE]
+    if (length(cliques) > MAX_CLIQUES) {
+        sizes <- vapply(cliques, length, integer(1L))
+        cliques <- cliques[order(sizes, decreasing = TRUE)[seq_len(MAX_CLIQUES)]]
+        warning("Clique list truncated to MAX_CLIQUES=", MAX_CLIQUES)
+    }
+    rm(active_graph)
+}
+
+message("Cliques retained: ", length(cliques))
+
+# Keep exactly these two top-level elements for compatibility with the
+# existing clique_geochem wrapper.
+result <- list(graph = graph, cliques = cliques)
+dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+
+# Write atomically so a killed job does not leave a partial RDS file that a
+# later Pegasus run could mistake for a valid reusable product.
+temporary_output <- tempfile(pattern = ".asv_cliques_",
+                             tmpdir = dirname(output_file), fileext = ".rds")
+saveRDS(result, temporary_output, compress = "gzip")
+if (!file.rename(temporary_output, output_file)) {
+    if (!file.copy(temporary_output, output_file, overwrite = TRUE)) {
+        fail("could not move completed RDS to ", output_file)
+    }
+    unlink(temporary_output)
+}
+
+message("Saved ", output_file)
