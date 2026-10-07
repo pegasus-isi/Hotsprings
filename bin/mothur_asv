@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # mothur_asv  SEQS.fasta  SILVA.fasta  SILVA.tax  OUT_ASV.tsv  OUT_TAX.tsv
 #
-# Build a sample-by-ASV table by collapsing identical sequences across
-# samples while retaining their per-sample abundances.
-#
-# No environment-variable configuration is used.
+# Collapse identical sequences across samples, preserve their per-sample
+# counts, and classify the unique representative sequences with mothur.
 # ---------------------------------------------------------------------------
 
 set -Eeuo pipefail
@@ -20,7 +18,7 @@ SILVA_TAX="$3"
 OUT_ASV="$4"
 OUT_TAX="$5"
 
-# Fixed configuration
+# Fixed configuration; no environment-variable overrides.
 readonly CORES=8
 
 log() {
@@ -52,10 +50,8 @@ make_output_path() {
 
     directory="$(dirname -- "$requested")"
     filename="$(basename -- "$requested")"
-
     mkdir -p -- "$directory"
     directory="$(cd -- "$directory" && pwd -P)"
-
     printf '%s/%s\n' "$directory" "$filename"
 }
 
@@ -63,25 +59,16 @@ OUT_ASV="$(make_output_path "$OUT_ASV")"
 OUT_TAX="$(make_output_path "$OUT_TAX")"
 
 WORK="$(mktemp -d /tmp/mothur_asv.XXXXXX)"
-
-cleanup() {
-    rm -rf -- "$WORK"
-}
+cleanup() { rm -rf -- "$WORK"; }
 trap cleanup EXIT
 
 cd "$WORK"
-
 ln -s -- "$SILVA_DB" silva.fasta
 ln -s -- "$SILVA_TAX" silva.tax
 
-# ---------------------------------------------------------------------------
-# 1. Clean FASTA and create the read-to-sample group file.
-#
-# Accepted header examples:
+# Build a clean FASTA and the read-to-sample group file. Accepted header forms:
 #   ...Bv4v5-BRF1_...
 #   ...Bv4v5..BRF1_...
-# ---------------------------------------------------------------------------
-
 log "Reading and validating input FASTA"
 
 python3 - "$SEQS" seqs.fasta seqs.groups input_stats.tsv <<'PY'
@@ -90,40 +77,30 @@ import re
 import sys
 
 input_fasta, output_fasta, group_file, stats_file = sys.argv[1:5]
-
-sample_pattern = re.compile(
-    r"Bv4v5(?:-|\.\.)([A-Za-z0-9]+)_",
-    re.IGNORECASE
-)
-
+sample_pattern = re.compile(r"Bv4v5(?:-|\.\.)([A-Za-z0-9]+)_", re.I)
 allowed_sequence = re.compile(r"^[ACGTRYSWKMBDHVN]+$")
 
 
 def fasta_records(path):
     header = None
     sequence = []
-
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             line = raw_line.strip()
-
             if not line:
                 continue
-
             if line.startswith(">"):
                 if header is not None:
                     yield header, "".join(sequence)
-
                 header = line[1:].strip()
                 sequence = []
             else:
                 if header is None:
                     raise SystemExit(
-                        f"Sequence encountered before the first FASTA "
-                        f"header at line {line_number}"
+                        f"Sequence encountered before the first FASTA header "
+                        f"at line {line_number}"
                     )
                 sequence.append(line)
-
     if header is not None:
         yield header, "".join(sequence)
 
@@ -133,19 +110,14 @@ samples = set()
 seen_ids = set()
 sequence_hashes = set()
 
-with (
-    open(output_fasta, "w", encoding="utf-8") as fasta_out,
-    open(group_file, "w", encoding="utf-8") as group_out,
-):
+with open(output_fasta, "w", encoding="utf-8") as fasta_out, \
+     open(group_file, "w", encoding="utf-8") as group_out:
     for header, sequence in fasta_records(input_fasta):
         sequence_count += 1
-
         sequence_id = header.split()[0]
 
         if sequence_id in seen_ids:
-            raise SystemExit(
-                f"Duplicate FASTA identifier: {sequence_id}"
-            )
+            raise SystemExit(f"Duplicate FASTA identifier: {sequence_id}")
         seen_ids.add(sequence_id)
 
         match = sample_pattern.search(header)
@@ -157,58 +129,35 @@ with (
             )
 
         sample = match.group(1)
-
-        # Mothur uses hyphens as separators in group names.
-        if "-" in sample:
-            raise SystemExit(
-                f"Sample name contains a hyphen, which mothur does not "
-                f"allow in group names: {sample}"
-            )
-
-        sequence = (
-            sequence.upper()
-            .replace("U", "T")
-            .replace("-", "")
-            .replace(".", "")
-        )
+        sequence = (sequence.upper().replace("U", "T")
+                    .replace("-", "").replace(".", ""))
 
         if not sequence:
-            raise SystemExit(
-                f"Empty sequence for FASTA identifier: {sequence_id}"
-            )
-
+            raise SystemExit(f"Empty sequence for FASTA identifier: {sequence_id}")
         if not allowed_sequence.fullmatch(sequence):
-            bad = sorted(set(allowed_sequence.sub("", sequence)))
+            invalid = sorted(set(allowed_sequence.sub("", sequence)))
             raise SystemExit(
-                f"Invalid sequence character for {sequence_id}: {bad}"
+                f"Invalid sequence character for {sequence_id}: {invalid}"
             )
 
-        sequence_hashes.add(
-            hashlib.sha256(sequence.encode("ascii")).digest()
-        )
+        sequence_hashes.add(hashlib.sha256(sequence.encode("ascii")).digest())
         samples.add(sample)
-
         fasta_out.write(f">{sequence_id}\n{sequence}\n")
         group_out.write(f"{sequence_id}\t{sample}\n")
 
 if sequence_count == 0:
     raise SystemExit("No FASTA records were found")
-
 if len(samples) < 2:
     raise SystemExit(
         f"Only {len(samples)} sample was identified; expected multiple samples"
     )
-
 if len(sequence_hashes) < 2:
     raise SystemExit(
-        "All input records contain the same sequence. "
-        "Check the input FASTA before continuing."
+        "All input records contain the same sequence. Check the input FASTA."
     )
 
 with open(stats_file, "w", encoding="utf-8") as stats:
-    stats.write(
-        f"{sequence_count}\t{len(sequence_hashes)}\t{len(samples)}\n"
-    )
+    stats.write(f"{sequence_count}\t{len(sequence_hashes)}\t{len(samples)}\n")
 
 print(f"[input] sequences: {sequence_count}")
 print(f"[input] distinct exact sequences: {len(sequence_hashes)}")
@@ -217,26 +166,21 @@ print(f"[input] sample names: {' '.join(sorted(samples))}")
 PY
 
 read -r INPUT_READS INPUT_UNIQUE INPUT_SAMPLES < input_stats.tsv
-
 log "Input reads: $INPUT_READS"
 log "Distinct input sequences: $INPUT_UNIQUE"
 log "Samples: $INPUT_SAMPLES"
 
-# ---------------------------------------------------------------------------
-# 2. Collapse identical sequences.
-#
-# seqs.names records all original reads represented by each unique sequence.
-# ---------------------------------------------------------------------------
-
+# Collapse identical sequences and preserve the membership mapping.
 log "Collapsing identical sequences with unique.seqs"
-
-mothur "#unique.seqs(fasta=seqs.fasta)"
+# Force a names file. Newer mothur releases may default to format=count,
+# which produces seqs.count_table but no seqs.names; count.seqs needs the
+# names mapping together with seqs.groups to preserve per-sample abundance.
+mothur "#unique.seqs(fasta=seqs.fasta, format=name)"
 
 [[ -s seqs.unique.fasta ]] || {
     log "ERROR: unique.seqs did not produce seqs.unique.fasta"
     exit 1
 }
-
 [[ -s seqs.names ]] || {
     log "ERROR: unique.seqs did not produce seqs.names"
     exit 1
@@ -247,131 +191,131 @@ log "Unique representative sequences: $UNIQUE_COUNT"
 
 if [[ "$UNIQUE_COUNT" -lt 2 ]]; then
     log "ERROR: unique.seqs produced fewer than two sequences"
-    log "Check whether the input FASTA contains real sequence data"
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# 3. Produce a count table with one column per sample.
-# ---------------------------------------------------------------------------
+# Generate the representative-sequence x sample count table directly from
+# unique.seqs' names mapping and our validated group file. mothur 1.47 can
+# produce a non-rectangular count.seqs file for this large input (the header
+# and data rows have different column counts), so do not use count.seqs here.
+COUNT_FILE="seqs.count_table"
+log "Building the per-sample count table from seqs.names and seqs.groups"
 
-log "Building the sample count table with count.seqs"
-
-mothur "#count.seqs(name=seqs.names, group=seqs.groups)"
-
-COUNT_FILE=""
-
-for candidate in seqs.count_table seqs.seq.count; do
-    if [[ -s "$candidate" ]]; then
-        COUNT_FILE="$candidate"
-        break
-    fi
-done
-
-if [[ -z "$COUNT_FILE" ]]; then
-    shopt -s nullglob
-    count_candidates=( *.count_table *.seq.count )
-    shopt -u nullglob
-
-    if [[ ${#count_candidates[@]} -gt 0 ]]; then
-        COUNT_FILE="${count_candidates[0]}"
-    fi
-fi
-
-if [[ -z "$COUNT_FILE" || ! -s "$COUNT_FILE" ]]; then
-    log "ERROR: count.seqs did not produce a count table"
-    exit 1
-fi
-
-log "Mothur count table: $COUNT_FILE"
-
-# Convert the mothur count table into the table expected downstream:
-#
-# ASV  total  SAMPLE1  SAMPLE2 ...
-#
-# Also calculate prevalence before spending time on classification.
-
-python3 - \
-    "$COUNT_FILE" \
-    asv_table.tsv \
-    count_stats.tsv <<'PY'
+python3 - seqs.names seqs.groups "$COUNT_FILE" asv_table.tsv count_stats.tsv <<'PY'
 import csv
 import sys
+from collections import Counter
 
-input_file, output_file, stats_file = sys.argv[1:4]
+names_file, groups_file, count_file, output_file, stats_file = sys.argv[1:6]
 
-with open(input_file, encoding="utf-8") as handle:
-    rows = [
-        line.rstrip("\n").split("\t")
-        for line in handle
-        if line.strip()
-    ]
+# Map every original read ID to its sample. Popping IDs below also verifies
+# that every read occurs exactly once in the unique.seqs names mapping.
+sample_by_id = {}
+sample_set = set()
+with open(groups_file, encoding="utf-8") as handle:
+    for line_number, line in enumerate(handle, 1):
+        if not line.strip():
+            continue
+        fields = line.split()
+        if len(fields) != 2:
+            raise SystemExit(
+                f"Invalid group-file row {line_number}: expected 2 fields, "
+                f"found {len(fields)}"
+            )
+        sequence_id, sample = fields
+        if sequence_id in sample_by_id:
+            raise SystemExit(f"Duplicate sequence ID in group file: {sequence_id}")
+        sample_by_id[sequence_id] = sample
+        sample_set.add(sample)
 
-if not rows:
-    raise SystemExit("The mothur count table is empty")
+if not sample_by_id:
+    raise SystemExit("The group file is empty")
 
-header = rows[0]
+sample_names = sorted(sample_set)
+sample_index = {sample: index for index, sample in enumerate(sample_names)}
+input_read_count = len(sample_by_id)
 
-# Handle whitespace-separated output if necessary.
-if len(header) == 1:
-    with open(input_file, encoding="utf-8") as handle:
-        rows = [line.split() for line in handle if line.strip()]
-    header = rows[0]
-
-if len(header) < 3:
-    raise SystemExit(
-        "The count table has no sample columns. "
-        "Check seqs.groups and count.seqs."
-    )
-
-sample_names = header[2:]
 asv_count = 0
 shared_two = 0
 shared_three = 0
+represented_reads = 0
 
-with open(output_file, "w", newline="", encoding="utf-8") as output:
-    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
-    writer.writerow(["ASV", "total"] + sample_names)
+with open(names_file, encoding="utf-8") as names_handle, \
+     open(count_file, "w", newline="", encoding="utf-8") as mothur_output, \
+     open(output_file, "w", newline="", encoding="utf-8") as asv_output:
+    mothur_writer = csv.writer(mothur_output, delimiter="\t", lineterminator="\n")
+    asv_writer = csv.writer(asv_output, delimiter="\t", lineterminator="\n")
+    mothur_writer.writerow(["Representative_Sequence", "total"] + sample_names)
+    asv_writer.writerow(["ASV", "total"] + sample_names)
 
-    for line_number, row in enumerate(rows[1:], 2):
-        if len(row) != len(header):
+    for line_number, line in enumerate(names_handle, 1):
+        if not line.strip():
+            continue
+        fields = line.rstrip("\r\n").split("\t", 1)
+        if len(fields) != 2:
+            fields = line.split(None, 1)
+        if len(fields) != 2:
             raise SystemExit(
-                f"Invalid count-table row {line_number}: "
-                f"expected {len(header)} columns, found {len(row)}"
+                f"Invalid names-file row {line_number}: expected a "
+                "representative ID and a comma-separated membership list"
             )
 
-        try:
-            total = int(row[1])
-            counts = [int(value) for value in row[2:]]
-        except ValueError as error:
-            raise SystemExit(
-                f"Non-integer abundance at count-table row {line_number}: "
-                f"{error}"
-            )
+        representative, member_text = fields
+        members = [item for item in member_text.split(",") if item]
+        if not members:
+            raise SystemExit(f"No members for representative {representative}")
 
-        if total != sum(counts):
-            raise SystemExit(
-                f"Count mismatch for {row[0]}: "
-                f"total={total}, sample sum={sum(counts)}"
-            )
+        by_sample = Counter()
+        for sequence_id in members:
+            sample = sample_by_id.pop(sequence_id, None)
+            if sample is None:
+                raise SystemExit(
+                    f"Sequence {sequence_id} is missing from seqs.groups or "
+                    "occurs more than once in seqs.names"
+                )
+            by_sample[sample] += 1
+
+        counts = [0] * len(sample_names)
+        for sample, value in by_sample.items():
+            counts[sample_index[sample]] = value
+
+        total = len(members)
+        represented_reads += total
 
         prevalence = sum(value > 0 for value in counts)
-
         asv_count += 1
         shared_two += prevalence >= 2
         shared_three += prevalence >= 3
+        row = [representative, total] + counts
+        mothur_writer.writerow(row)
+        asv_writer.writerow(row)
 
-        writer.writerow([row[0], total] + counts)
+if sample_by_id:
+    examples = ", ".join(list(sample_by_id)[:5])
+    raise SystemExit(
+        f"{len(sample_by_id)} group-file IDs were absent from seqs.names. "
+        f"Examples: {examples}"
+    )
+if represented_reads != input_read_count:
+    raise SystemExit(
+        f"Read-count mismatch: represented={represented_reads}, "
+        f"input={input_read_count}"
+    )
 
 with open(stats_file, "w", encoding="utf-8") as stats:
     stats.write(
-        f"{asv_count}\t{len(sample_names)}\t"
-        f"{shared_two}\t{shared_three}\n"
+        f"{asv_count}\t{len(sample_names)}\t{shared_two}\t{shared_three}\n"
     )
 PY
 
-read -r NASV NSAMPLES SHARED2 SHARED3 < count_stats.tsv
+[[ -s "$COUNT_FILE" ]] || {
+    log "ERROR: direct count-table construction produced no output"
+    exit 1
+}
 
+log "Mothur count table: $COUNT_FILE"
+
+read -r NASV NSAMPLES SHARED2 SHARED3 < count_stats.tsv
 log "ASVs: $NASV"
 log "Samples: $NSAMPLES"
 log "ASVs present in at least 2 samples: $SHARED2"
@@ -379,19 +323,13 @@ log "ASVs present in at least 3 samples: $SHARED3"
 
 if [[ "$SHARED2" -eq 0 ]]; then
     log "ERROR: no exact sequence is shared between two samples"
-    log "The network and NMDS would not be meaningful"
-    log "Check preprocessing, sequence orientation and trimming"
+    log "Check preprocessing, sequence orientation, and trimming"
     exit 4
 fi
 
-# ---------------------------------------------------------------------------
-# 4. Classify the unique representative sequences only.
-# ---------------------------------------------------------------------------
-
+# Classify only the unique representative sequences.
 log "Classifying $NASV unique sequences against SILVA"
-
-mothur \
-    "#classify.seqs(fasta=seqs.unique.fasta, count=$COUNT_FILE, reference=silva.fasta, taxonomy=silva.tax, processors=$CORES)"
+mothur "#classify.seqs(fasta=seqs.unique.fasta, count=$COUNT_FILE, reference=silva.fasta, taxonomy=silva.tax, processors=$CORES)"
 
 shopt -s nullglob
 taxonomy_candidates=( seqs.unique*.taxonomy )
@@ -405,10 +343,6 @@ fi
 MOTHUR_TAX="${taxonomy_candidates[0]}"
 log "Mothur taxonomy file: $MOTHUR_TAX"
 
-# ---------------------------------------------------------------------------
-# 5. Convert taxonomy to the downstream format.
-# ---------------------------------------------------------------------------
-
 python3 - asv_table.tsv "$MOTHUR_TAX" taxonomy.tsv <<'PY'
 import csv
 import re
@@ -417,53 +351,37 @@ import sys
 asv_table, taxonomy_file, output_file = sys.argv[1:4]
 ranks = ["Domain", "Phylum", "Class", "Order", "Family", "Genus"]
 
-asv_ids = []
-
 with open(asv_table, encoding="utf-8") as handle:
     reader = csv.reader(handle, delimiter="\t")
     next(reader)
-
-    for row in reader:
-        if row:
-            asv_ids.append(row[0])
+    asv_ids = [row[0] for row in reader if row]
 
 taxonomy = {}
-
 with open(taxonomy_file, encoding="utf-8", errors="replace") as handle:
     for line in handle:
         fields = line.rstrip("\n").split("\t", 1)
-
         if len(fields) != 2:
             continue
-
         sequence_id, tax_string = fields
-
         parts = []
-
         for item in tax_string.strip(";").split(";"):
             item = item.strip().strip('"')
             item = re.sub(r"\([^)]*\)$", "", item).strip().strip('"')
-
             if not item or item.lower() == "unclassified":
                 item = "NA"
-
             parts.append(item)
-
         taxonomy[sequence_id] = (parts + ["NA"] * len(ranks))[:len(ranks)]
 
 missing = [sequence_id for sequence_id in asv_ids if sequence_id not in taxonomy]
-
 if missing:
-    preview = ", ".join(missing[:5])
     raise SystemExit(
         f"Taxonomy was not returned for {len(missing)} ASVs. "
-        f"Examples: {preview}"
+        f"Examples: {', '.join(missing[:5])}"
     )
 
 with open(output_file, "w", newline="", encoding="utf-8") as output:
     writer = csv.writer(output, delimiter="\t", lineterminator="\n")
     writer.writerow(["ASV"] + ranks)
-
     for sequence_id in asv_ids:
         writer.writerow([sequence_id] + taxonomy[sequence_id])
 
