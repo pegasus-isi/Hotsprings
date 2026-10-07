@@ -8,7 +8,6 @@ input/
 runs/
 work/
 output/
-wf-output/
 wf-scratch/
 .pegasus*
 logs/
