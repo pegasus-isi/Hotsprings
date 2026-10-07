@@ -83,7 +83,7 @@ beams, manual overrides) are copied through unchanged.
 ## Layout
 
 ```
-noble-gas-workflow/
+workflow/
 ├── noble_gas_workflow.py     # generates the DAG (noble-gas-reduction.yml)
 ├── noble-gas-reduction.yml   # the generated abstract workflow (DAG)
 ├── pegasus.properties        # generated properties
@@ -108,7 +108,7 @@ noble-gas-workflow/
 
 ```bash
 # the input workbook is already in input/GAS_PROCESS.xlsx
-cd noble-gas-workflow
+cd workflow
 ./plan.sh            # generate -> plan -> submit   (needs Pegasus 5.x + HTCondor)
 ```
 

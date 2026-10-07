@@ -9,42 +9,42 @@ replicaCatalog:
   - lfn: GAS_PROCESS.xlsx
     pfns:
     - site: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/input/GAS_PROCESS.xlsx
+      pfn: file:///mnt/user-data/outputs/workflow/input/GAS_PROCESS.xlsx
   - lfn: gaslib.py
     pfns:
     - site: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/gaslib.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/gaslib.py
 transformationCatalog:
   transformations:
   - name: build_semiraw
     sites:
     - name: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/build_semiraw.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/build_semiraw.py
       type: stageable
   - name: compute_references
     sites:
     - name: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/compute_references.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/compute_references.py
       type: stageable
   - name: blanks_tab
     sites:
     - name: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/blanks_tab.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/blanks_tab.py
       type: stageable
   - name: air_stds_tab
     sites:
     - name: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/air_stds_tab.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/air_stds_tab.py
       type: stageable
   - name: samples_tab
     sites:
     - name: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/samples_tab.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/samples_tab.py
       type: stageable
   - name: assemble_workbook
     sites:
     - name: local
-      pfn: file:///mnt/user-data/outputs/noble-gas-workflow/bin/assemble_workbook.py
+      pfn: file:///mnt/user-data/outputs/workflow/bin/assemble_workbook.py
       type: stageable
 jobs:
 - type: job

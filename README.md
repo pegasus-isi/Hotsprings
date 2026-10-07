@@ -15,7 +15,7 @@ comparison or review.
 │   └── Reproducing_the_Noble-Gas_Pipeline_in_Python.pdf
 ├── outputs/
 │   └── oct_tabs_generated.xlsx
-├── noble-gas-workflow-3/
+├── workflow/
 │   ├── noble_gas_workflow.py
 │   ├── noble-gas-reduction.yml
 │   ├── input/GAS_PROCESS.xlsx
@@ -35,16 +35,16 @@ comparison or review.
 | `data/Oct2026_GAS_PROCESS_source.xlsx` | Source workbook used as workflow input |
 | `outputs/oct_tabs_generated.xlsx` | Generated workbook snapshot |
 | `docs/Reproducing_the_Noble-Gas_Pipeline_in_Python.pdf` | Companion pipeline documentation |
-| `noble-gas-workflow-3/` | Pegasus workflow package for the noble-gas reduction pipeline |
+| `workflow/` | Pegasus workflow package for the noble-gas reduction pipeline |
 
 ## Additional Pegasus Workflow
 
-`noble-gas-workflow-3/` is included as a separate workflow package in this
+`workflow/` is included as a separate workflow package in this
 branch. It contains a Pegasus 5.x abstract workflow, DAG images, a local site
 catalog, stage scripts under `bin/`, and its own input workbook under
-`noble-gas-workflow-3/input/GAS_PROCESS.xlsx`.
+`workflow/input/GAS_PROCESS.xlsx`.
 
-See `noble-gas-workflow-3/README.md` for the workflow DAG, Pegasus planning
+See `workflow/README.md` for the workflow DAG, Pegasus planning
 steps, and standalone stage-by-stage run commands.
 
 ## Setup
