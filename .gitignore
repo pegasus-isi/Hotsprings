@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Keep the committed output snapshot, but ignore ad hoc generated workbooks.
+outputs/*.xlsx
+!outputs/oct_tabs_generated.xlsx
+outputs/tabs__*.xlsx

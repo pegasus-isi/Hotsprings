@@ -1,6 +1,6 @@
 """
-output_tabs.py  --  OOP noble-gas tab reproducer (version-independent)
-=====================================================================
+noble_gas_reducer.py  --  OOP noble-gas tab reproducer
+=======================================================
 Copies the whole workbook through (nothing is ever dropped) and overlays
 Python-reproduced values on each calculated tab. One class per table:
 
@@ -13,8 +13,9 @@ Everything (columns, constants, lookup tables, blank/air-std selection,
 depletion on/off) is auto-detected from the file, so the same code works
 across sheet revisions (Aug-2024, Oct-2026, ...).
 
-    python output_tabs.py  <input_workbook.xlsx>  [output.xlsx]
-    python output_tabs.py  <input_workbook.xlsx>  <prefix>  --separate
+    python src/noble_gas_reducer.py
+    python src/noble_gas_reducer.py  <input_workbook.xlsx>  [output.xlsx]
+    python src/noble_gas_reducer.py  <input_workbook.xlsx>  <prefix>  --separate
         (--separate writes one .xlsx PER TAB, named <prefix>__<TabName>.xlsx)
 """
 import sys
@@ -430,8 +431,11 @@ def main():
     argv = sys.argv[1:]
     separate = any(a in ("-s", "--separate", "--split") for a in argv)
     pos = [a for a in argv if not a.startswith("-")]
-    in_path = pos[0] if pos else "Oct2026_GAS_PROCESS.xlsx"
-    out_path = pos[1] if len(pos) > 1 else ("tabs" if separate else "output_tabs.xlsx")
+    in_path = pos[0] if pos else os.path.join("data", "Oct2026_GAS_PROCESS_source.xlsx")
+    out_path = pos[1] if len(pos) > 1 else (
+        os.path.join("outputs", "tabs") if separate
+        else os.path.join("outputs", "oct_tabs_generated.xlsx")
+    )
 
     wb = GasWorkbook(in_path)
     out = Workbook()
@@ -446,6 +450,9 @@ def main():
             print(f"        {p}")
         print()
     else:
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
         out.save(out_path)
         print(f"input : {in_path}")
         print(f"output: {out_path}  (all {len(out.sheetnames)} tabs kept)\n")
