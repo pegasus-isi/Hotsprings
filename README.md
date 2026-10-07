@@ -22,6 +22,10 @@ The 16S branch starts from the processed 16S sequences at NCBI (KEBJ01) — no
 raw reads needed. SILVA is used directly from mothur. The metagenome branch
 processes the ENA reads through enzyme annotation.
 
+This repository also includes a completed output snapshot in `wf-output/`, so
+the generated report and result tables can be inspected without rerunning the
+full workflow.
+
 ---
 
 ## Run it in three commands
@@ -31,6 +35,9 @@ make containers    # 1. build the container images (once)
 make data          # 2. download & organize every input
 make run           # 3. plan + submit the workflow
 ```
+
+Workflow products are staged into `wf-output/`. The committed snapshot was
+generated from the refreshed workflow version.
 
 ## Already have the data?
 
@@ -80,6 +87,27 @@ matching the paper's station codes automatically.
 
 ---
 
+## Included workflow outputs
+
+The current repository includes the latest generated `wf-output/` directory:
+
+| Output | Description |
+|---|---|
+| `report.html` | Final HTML report assembled by the workflow |
+| `fig2.pdf` | NMDS figure generated from the 16S analysis |
+| `asv_table.tsv` | 16S ASV abundance table |
+| `nmds.tsv`, `adonis.tsv` | Ordination coordinates and PERMANOVA results |
+| `gene_table.tsv` | Merged metagenomic carbon-fixation enzyme table |
+| `gene_clique_env.tsv` | Gene-clique and environmental correlation summary |
+| `carbon_flux.tsv` | Carbon-flux estimate |
+| `*_enzymes.tsv` | Per-sample mi-faser enzyme annotations |
+
+`wf-output/asv_table.tsv` is a large generated table, about 98.8 MB on GitHub.
+It is tracked in this repository for convenience, but future large-output
+releases may be easier to manage with Git LFS or release assets.
+
+---
+
 ## Project layout
 
 ```
@@ -120,6 +148,14 @@ subductcr/
 │       ├── cell_counts.csv         # derived from reference_data/geochem.csv
 │       ├── silva_v132.db|.tax      # fetched from mothur
 │       └── ena_map.tsv             # sample<->run map (built from ENA)
+├── wf-output/                 # committed output snapshot from the workflow
+│   ├── report.html
+│   ├── fig2.pdf
+│   ├── asv_table.tsv
+│   ├── gene_table.tsv
+│   └── *_enzymes.tsv
+├── scripts/
+│   └── make_source_zip.sh     # package source while keeping wf-output/
 └── docs/data_sources.md       # exact provenance of every input
 ```
 
