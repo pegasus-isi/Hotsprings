@@ -1,8 +1,0 @@
-# mothur + trimmomatic for the 16S ASV and read-trimming steps.
-FROM ubuntu:22.04
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        mothur trimmomatic python3 wget ca-certificates \
-    && ln -sf /usr/share/java/trimmomatic.jar /usr/local/bin/trimmomatic.jar \
-    && printf '#!/bin/bash\njava -jar /usr/local/bin/trimmomatic.jar "$@"\n' > /usr/local/bin/trimmomatic \
-    && chmod +x /usr/local/bin/trimmomatic \
-    && rm -rf /var/lib/apt/lists/*
