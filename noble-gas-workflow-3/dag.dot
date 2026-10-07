@@ -1,0 +1,41 @@
+digraph noble_gas_reduction {
+  rankdir=TB;
+  bgcolor="white";
+  labelloc="t";
+  fontname="Helvetica"; fontsize=18;
+  label="noble-gas-reduction  ·  Pegasus DAG";
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=10, color="#44505c", arrowsize=0.8];
+
+  // jobs
+  node [shape=box, style="rounded,filled", fillcolor="#d7f0ea", color="#0f8a7a", penwidth=1.6];
+  build_semiraw; blanks_tab; air_stds_tab; samples_tab; assemble_workbook;
+  node [fillcolor="#e6dcf3", color="#6b4ea8"];
+  compute_references;
+
+  // files
+  node [shape=note, style="filled", fillcolor="#eef0f2", color="#8a95a0", penwidth=1.2];
+  wb      [label="GAS_PROCESS.xlsx\n(input · read by every job)"];
+  node [fillcolor="#fbe7cf", color="#b9681a"];
+  out     [label="GAS_PROCESS_reproduced.xlsx\n(one file · all tabs)"];
+
+  // edges (file-driven)
+  wb -> build_semiraw;
+  build_semiraw -> compute_references [label="blanks / air_stds"];
+  compute_references -> blanks_tab    [label="blank_ref"];
+  compute_references -> air_stds_tab  [label="blank_ref"];
+  compute_references -> samples_tab   [label="blank_ref + airstd_ref"];
+  blanks_tab   -> assemble_workbook   [label="blanks_tab"];
+  air_stds_tab -> assemble_workbook   [label="air_stds_tab"];
+  samples_tab  -> assemble_workbook   [label="samples_tab"];
+  build_semiraw -> assemble_workbook  [label="semi_raw", style=dashed, constraint=false];
+  assemble_workbook -> out;
+
+  // workbook is also read by the tab jobs + assemble (dashed, de-emphasised)
+  wb -> blanks_tab   [style=dotted, color="#aab2bb", constraint=false];
+  wb -> air_stds_tab [style=dotted, color="#aab2bb", constraint=false];
+  wb -> samples_tab  [style=dotted, color="#aab2bb", constraint=false];
+  wb -> assemble_workbook [style=dotted, color="#aab2bb", constraint=false];
+
+  { rank=same; blanks_tab; air_stds_tab; samples_tab; }   // PARALLEL
+}

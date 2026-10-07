@@ -1,0 +1,23 @@
+# Minimal site catalog: run everything locally.
+# For a cluster, add a condorpool / slurm site and point jobs at it.
+pegasus: "5.0"
+sites:
+  - name: "local"
+    arch: "x86_64"
+    os.type: "linux"
+    directories:
+      - type: "sharedScratch"
+        path: "${PWD}/work/scratch"
+        fileServers:
+          - operation: "all"
+            url: "file://${PWD}/work/scratch"
+      - type: "localStorage"
+        path: "${PWD}/output"
+        fileServers:
+          - operation: "all"
+            url: "file://${PWD}/output"
+    profiles:
+      env:
+        PATH: "/usr/bin:/bin"
+      pegasus:
+        clusters.num: "1"
