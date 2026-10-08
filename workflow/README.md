@@ -13,6 +13,29 @@ the Aug-2024 and Oct-2026 sheets to machine precision, worst diff ~1e-15).
 
 ![DAG](dag.png)
 
+## Workflow description
+
+This workflow turns one source workbook, `input/GAS_PROCESS.xlsx`, into one
+reproduced workbook, `GAS_PROCESS_reproduced.xlsx`. The Pegasus DAG is organized
+as a small fan-out/fan-in pipeline:
+
+1. `build_semiraw` reads the workbook first. It parses the raw paste tabs into a
+   unified `semi_raw.csv`, then splits the rows by run type into `blanks.csv`,
+   `air_stds.csv`, and `samples.csv`.
+2. `compute_references` uses the blank and air-standard rows to build the shared
+   calibration files: `blank_ref.json` and `airstd_ref.json`.
+3. `blanks_tab`, `air_stds_tab`, and `samples_tab` run independently once their
+   required reference files exist. These jobs recreate the calculated cells for
+   their corresponding workbook tabs.
+4. `assemble_workbook` gathers the `Semi Raw` table and the three reproduced tab
+   overlays, copies all unchanged workbook sheets through, and writes the final
+   workbook with every tab included.
+
+The dashed copy-through path in the DAG means the original workbook remains an
+input to the final assembly step. The workflow recomputes the calculated values,
+but it preserves supporting sheets, reference tables, raw pasted data, and any
+manual cells that are not part of the reproduced calculations.
+
 ```
 GAS_PROCESS.xlsx ─(read by every job)─┐
                                       ▼
