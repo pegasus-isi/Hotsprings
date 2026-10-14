@@ -1,4 +1,7 @@
 FROM mambaorg/micromamba:1.5.8
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl wget ca-certificates && rm -rf /var/lib/apt/lists/* || \
+    micromamba install -y -n base -c conda-forge curl wget && micromamba clean -a -y
 RUN micromamba install -y -n base -c bioconda -c conda-forge fastp && micromamba clean -a -y
 ENV PATH=/opt/conda/bin:$PATH
 

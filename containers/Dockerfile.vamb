@@ -1,6 +1,6 @@
 # GPU container built on NVIDIA CUDA base so pytorch-gpu resolves cleanly.
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
-RUN apt-get update && apt-get install -y --no-install-recommends wget bzip2 ca-certificates && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl bzip2 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 # install micromamba
 RUN wget -qO- https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local bin/micromamba

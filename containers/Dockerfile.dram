@@ -1,4 +1,7 @@
 FROM mambaorg/micromamba:1.5.8
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl wget ca-certificates && rm -rf /var/lib/apt/lists/* || \
+    micromamba install -y -n base -c conda-forge curl wget && micromamba clean -a -y
 # KOfam annotation (lightweight) instead of full DRAM — gives KO numbers.
 RUN micromamba install -y -n base -c bioconda -c conda-forge \
     kofamscan prodigal hmmer && micromamba clean -a -y
