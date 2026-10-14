@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# assembly R1 R2 OUT_CONTIGS  — MEGAHIT
+set -euo pipefail
+R1="$(readlink -f "$1")"; R2="$(readlink -f "$2")"; OUT="$3"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+megahit -1 "$R1" -2 "$R2" -o "$W/out" -t "${PEGASUS_CORES:-64}" --min-contig-len 1000
+cp "$W/out/final.contigs.fa" "$OUT"
+echo "[assembly] contigs -> $OUT"

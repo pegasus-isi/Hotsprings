@@ -1,0 +1,112 @@
+# ============================================================================
+# metal_genes.ref — metal & nutrient cycling genes (KEGG KO numbers)
+# Curated for subduction-zone hot-spring metagenomes (Fe · S · N · Mn · As · H2)
+# One KO per line; comment lines start with '#'.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# IRON (Fe) cycling
+# ---------------------------------------------------------------------------
+# Iron oxidation
+K00370   # narG/nxrA  nitrate reductase / iron-related oxidoreductase
+K02567   # napA  periplasmic nitrate reductase (Fe-linked)
+K02568   # napB
+# Iron reduction / transport
+K07224   # iron-related regulator
+K04759   # feoB  ferrous iron transport protein B
+K04758   # feoA  ferrous iron transport protein A
+K07243   # high-affinity iron transporter
+K07244   # ferrous iron transport
+K02016   # ABC Fe3+ transport permease
+K02015   # ABC Fe3+ transport
+# Magnetite / Fe storage
+K02217   # ftnA  ferritin
+K03594   # bfr  bacterioferritin
+
+# ---------------------------------------------------------------------------
+# SULFUR (S) cycling
+# ---------------------------------------------------------------------------
+# Sulfate reduction (dissimilatory)
+K11180   # dsrA  dissimilatory sulfite reductase alpha
+K11181   # dsrB  dissimilatory sulfite reductase beta
+K00958   # sat / met3  sulfate adenylyltransferase
+K00394   # aprA  adenylylsulfate reductase alpha
+K00395   # aprB  adenylylsulfate reductase beta
+# Sulfur oxidation (SOX system)
+K17222   # soxA
+K17223   # soxX
+K17224   # soxB
+K17225   # soxC
+K17226   # soxY
+K17227   # soxZ
+# Thiosulfate / sulfide
+K08352   # phsA  thiosulfate reductase
+K17218   # sqr   sulfide:quinone oxidoreductase
+K16952   # dsrE
+# Elemental sulfur
+K22622   # tetrathionate reductase
+
+# ---------------------------------------------------------------------------
+# NITROGEN (N) cycling
+# ---------------------------------------------------------------------------
+# Nitrogen fixation
+K02588   # nifH  nitrogenase iron protein
+K02586   # nifD  nitrogenase molybdenum-iron alpha
+K02591   # nifK  nitrogenase molybdenum-iron beta
+# Nitrification
+K10944   # amoA  ammonia monooxygenase alpha
+K10945   # amoB
+K10946   # amoC
+K00368   # nirK  nitrite reductase (NO-forming, Cu)
+K15864   # nirS  nitrite reductase (cd1)
+# Denitrification
+K00370   # narG  nitrate reductase alpha
+K00371   # narH  nitrate reductase beta
+K00374   # narI
+K04561   # norB  nitric oxide reductase
+K02305   # norC
+K00376   # nosZ  nitrous oxide reductase
+# DNRA / ammonification
+K00362   # nirB  nitrite reductase (NADH) large
+K00363   # nirD  nitrite reductase (NADH) small
+K03385   # nrfA  nitrite reductase (cytochrome c-552)
+
+# ---------------------------------------------------------------------------
+# MANGANESE (Mn) cycling
+# ---------------------------------------------------------------------------
+K07508   # Mn-related oxidoreductase
+K00547   # Mn catalase
+K03729   # mntH  manganese transport
+K11690   # mntA  manganese ABC transporter
+K11691   # mntB
+K11692   # mntC
+
+# ---------------------------------------------------------------------------
+# ARSENIC (As) cycling
+# ---------------------------------------------------------------------------
+K00537   # arsC  arsenate reductase
+K03325   # arsB  arsenite efflux
+K03893   # arsR  arsenic resistance regulator
+K08355   # arsA  arsenite-transporting ATPase
+K18701   # arrA  respiratory arsenate reductase alpha
+K18702   # arrB
+K08356   # aioA  arsenite oxidase large subunit
+
+# ---------------------------------------------------------------------------
+# HYDROGEN (H2) metabolism  (key in subduction-zone fluids)
+# ---------------------------------------------------------------------------
+K00437   # [NiFe] hydrogenase large
+K18008   # [NiFe] hydrogenase small
+K06441   # hydrogenase maturation
+K05586   # hybA  hydrogenase-2 small
+K05922   # hyaB  hydrogenase-1 large
+K00533   # hydrogenase (Fe-only) large
+K00534   # hydrogenase (Fe-only) small
+
+# ---------------------------------------------------------------------------
+# METHANE / C1 (often co-occurs in these systems)
+# ---------------------------------------------------------------------------
+K00399   # mcrA  methyl-coenzyme M reductase alpha
+K00401   # mcrB
+K00402   # mcrG
+K16157   # pmoA/amoA particulate methane monooxygenase

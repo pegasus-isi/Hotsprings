@@ -1,0 +1,11 @@
+.DS_Store
+data/metagenome/
+data/mags/
+runs/
+*.pyc
+__pycache__/
+*.egg-info/
+.eggs/
+*.log
+braindump.txt
+pegasus.properties

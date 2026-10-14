@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# read_map CONTIGS R1 R2 OUT_BAM  — Bowtie2 map + sort
+set -euo pipefail
+C="$(readlink -f "$1")"; R1="$(readlink -f "$2")"; R2="$(readlink -f "$3")"; OUT="$4"
+CORES="${PEGASUS_CORES:-16}"; W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+bowtie2-build --threads "$CORES" "$C" "$W/idx" >/dev/null 2>&1
+bowtie2 -p "$CORES" -x "$W/idx" -1 "$R1" -2 "$R2" 2>/dev/null | \
+  samtools sort -@ "$CORES" -o "$OUT"
+samtools index "$OUT"
+echo "[read_map] bam -> $OUT"

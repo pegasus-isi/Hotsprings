@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# mmseqs_metal  DRAM_ANNOTATIONS  METAL_REF  OUT_HITS
+# ---------------------------------------------------------------------------
+# Matches the KO numbers in DRAM's annotation output against the metal-gene
+# reference list (also KO numbers). This is KO-vs-KO matching — the IDs line
+# up, so metal-cycling genes are correctly detected.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+ANN="$(readlink -f "$1")"; REF="$(readlink -f "$2")"; OUT="$3"
+python3 - "$ANN" "$REF" "$OUT" <<'PY'
+import sys, re, csv
+ann, ref, out = sys.argv[1:4]
+
+# 1. load the metal-gene KO list (ignore comments / inline comments)
+metal = set()
+for line in open(ref):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    ko = line.split()[0]                       # first token = the KO
+    if re.match(r'^K\d{5}$', ko):
+        metal.add(ko)
+
+# 2. scan DRAM annotations for KO numbers; keep rows whose KO is a metal gene.
+#    DRAM's annotations.tsv has a column with KO ids (e.g. "kegg_id" / "ko_id").
+#    We robustly find any K##### token in each row.
+hits = []
+with open(ann) as fi:
+    reader = csv.reader(fi, delimiter="\t")
+    header = next(reader, None)
+    for row in reader:
+        gene = row[0] if row else ""
+        kos = set()
+        for cell in row:
+            for m in re.findall(r'K\d{5}', cell):
+                kos.add(m)
+        for ko in kos:
+            if ko in metal:
+                hits.append((gene, ko))
+
+# 3. write the metal hits
+with open(out, "w", newline="") as fo:
+    w = csv.writer(fo, delimiter="\t")
+    w.writerow(["gene", "metal_gene"])
+    for gene, ko in hits:
+        w.writerow([gene, ko])
+print(f"[mmseqs_metal] {len(hits)} metal-gene hits ({len(metal)} KOs in reference)")
+PY
+echo "[mmseqs_metal] -> $OUT"

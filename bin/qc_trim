@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# qc_trim R1 R2 OUT1 OUT2  — fastp quality trim
+set -euo pipefail
+R1="$(readlink -f "$1")"; R2="$(readlink -f "$2")"; O1="$3"; O2="$4"
+fastp -i "$R1" -I "$R2" -o "$O1" -O "$O2" --detect_adapter_for_pe \
+  --thread "${PEGASUS_CORES:-16}" --qualified_quality_phred 20 --length_required 50 \
+  --html /dev/null --json /dev/null
+echo "[qc_trim] done"

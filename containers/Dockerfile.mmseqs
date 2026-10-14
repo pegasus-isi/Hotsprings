@@ -1,0 +1,9 @@
+# MMseqs2 with GPU support — use the official GPU-enabled static build.
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+# MMseqs2 GPU static binary (works with CUDA on the host at runtime)
+RUN wget -qO- https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz | tar -xz -C /opt && \
+    ln -s /opt/mmseqs/bin/mmseqs /usr/local/bin/mmseqs
+# DRAM is CPU; keep MMseqs separate. For functional annotation add DBs at runtime.
+ENV PATH=/opt/mmseqs/bin:$PATH

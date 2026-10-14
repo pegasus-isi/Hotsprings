@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# bin_semibin CONTIGS BAM OUT_TAR  — SemiBin2 (GPU)
+set -euo pipefail
+C="$(readlink -f "$1")"; BAM="$(readlink -f "$2")"; OUT="$3"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+samtools index "$BAM" 2>/dev/null || true
+SemiBin2 single_easy_bin -i "$C" -b "$BAM" -o "$W/out" \
+  --threads "${PEGASUS_CORES:-16}" ${MAG_GPU:+--engine gpu} || \
+  SemiBin2 single_easy_bin -i "$C" -b "$BAM" -o "$W/out" --threads "${PEGASUS_CORES:-16}"
+tar -cf "$OUT" -C "$W/out" output_bins 2>/dev/null || tar -cf "$OUT" -C "$W" out
+echo "[bin_semibin] -> $OUT"

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# bin_comebin CONTIGS BAM OUT_TAR  — COMEBin (GPU)
+set -euo pipefail
+C="$(readlink -f "$1")"; BAM="$(readlink -f "$2")"; OUT="$3"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+mkdir -p "$W/bam"; cp "$BAM" "$W/bam/"
+run_comebin.sh -a "$C" -o "$W/out" -p "$W/bam" -t "${PEGASUS_CORES:-16}" || true
+tar -cf "$OUT" -C "$W" out 2>/dev/null || tar -cf "$OUT" --files-from /dev/null
+echo "[bin_comebin] -> $OUT"

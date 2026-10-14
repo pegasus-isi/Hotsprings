@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# bin_vamb CONTIGS BAM OUT_TAR  — VAMB (GPU)
+set -euo pipefail
+C="$(readlink -f "$1")"; BAM="$(readlink -f "$2")"; OUT="$3"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+vamb --outdir "$W/out" --fasta "$C" --bamfiles "$BAM" -p "${PEGASUS_CORES:-16}" ${MAG_GPU:+--cuda} || \
+  vamb --outdir "$W/out" --fasta "$C" --bamfiles "$BAM" -p "${PEGASUS_CORES:-16}" || true
+tar -cf "$OUT" -C "$W" out 2>/dev/null || tar -cf "$OUT" --files-from /dev/null
+echo "[bin_vamb] -> $OUT"

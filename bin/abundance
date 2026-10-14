@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# abundance MAGS R1 R2 OUT_COV  — CoverM per-sample MAG abundance
+set -euo pipefail
+MG="$(readlink -f "$1")"; R1="$(readlink -f "$2")"; R2="$(readlink -f "$3")"; OUT="$4"
+coverm contig --coupled "$R1" "$R2" --reference "$MG" --methods mean \
+  --threads "${PEGASUS_CORES:-16}" > "$OUT"
+echo "[abundance] -> $OUT"

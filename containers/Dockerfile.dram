@@ -1,0 +1,6 @@
+FROM mambaorg/micromamba:1.5.8
+# KOfam annotation (lightweight) instead of full DRAM — gives KO numbers.
+RUN micromamba install -y -n base -c bioconda -c conda-forge \
+    kofamscan prodigal hmmer && micromamba clean -a -y
+ENV PATH=/opt/conda/bin:$PATH
+# KOfam databases (~5GB) mounted at runtime; set MAG_KOFAM_DB

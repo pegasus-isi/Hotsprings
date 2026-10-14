@@ -1,0 +1,26 @@
+#!/usr/bin/env Rscript
+# predict INTEGRATED OUT  — simple metal-potential model (placeholder-ready)
+args <- commandArgs(trailingOnly=TRUE)
+inp <- args[1]; out <- args[2]
+d <- tryCatch(read.delim(inp, check.names=FALSE), error=function(e) data.frame())
+if (nrow(d) == 0 || !"sample" %in% names(d)) {
+  write.table(data.frame(note="insufficient data for prediction"), out, sep="\t", row.names=FALSE, quote=FALSE)
+} else {
+  # normalise coverage and metal gene count to [0,1], then combine as score
+  cov_col <- intersect(c("mag_abundance_sum", "total_coverage"), names(d))[1]
+  cov  <- if (!is.na(cov_col)) as.numeric(d[[cov_col]]) else rep(0, nrow(d))
+  # sum all per-KO metal columns produced by merge (metal_K#####)
+  metal_cols <- grep("^metal_", names(d), value = TRUE)
+  mgn  <- if (length(metal_cols) > 0) rowSums(d[, metal_cols, drop=FALSE], na.rm=TRUE) else rep(0, nrow(d))
+  norm <- function(x) { r <- range(x, na.rm=TRUE); if (diff(r)==0) rep(0,length(x)) else (x-r[1])/diff(r) }
+  # weight: 60 % metal genes, 40 % abundance (tunable)
+  score <- 0.6 * norm(mgn) + 0.4 * norm(cov)
+  res <- data.frame(sample=d$sample, mag_abundance_sum=cov, n_metal_genes_total=mgn,
+                    metal_potential_score=round(score, 4))
+  # attach key geochemistry columns if present
+  geo_cols <- intersect(c("temp","ph","fe_ac","mn_ac","so4","h2s","h2"), names(d))
+  if (length(geo_cols)) res <- cbind(res, d[, geo_cols, drop=FALSE])
+  res <- res[order(-res$metal_potential_score), ]
+  write.table(res, out, sep="\t", row.names=FALSE, quote=FALSE)
+}
+cat("[predict] wrote", out, "\n")

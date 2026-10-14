@@ -1,0 +1,68 @@
+#!/usr/bin/env Rscript
+# merge  GEOCHEM.csv  OUT.tsv  COV1..N  METALHITS1..N
+# ---------------------------------------------------------------------------
+# Builds the integrated table: per-sample MAG abundance + metal-gene counts,
+# JOINED with the site geochemistry. Samples without a geochem row keep NA
+# for the environmental columns (left join on 'sample').
+# ---------------------------------------------------------------------------
+args  <- commandArgs(trailingOnly = TRUE)
+geo_f <- args[1]
+out_f <- args[2]
+rest  <- args[-(1:2)]
+covs  <- rest[grepl("coverage",   rest)]
+hits  <- rest[grepl("metal_hits", rest)]
+
+# ---- geochemistry (sample x variables) ----
+geo <- tryCatch(read.csv(geo_f, check.names = FALSE, stringsAsFactors = FALSE),
+                error = function(e) data.frame())
+if (nrow(geo) > 0) {
+  names(geo)[1] <- "sample"            # first column is the sample key
+}
+
+# ---- per-sample MAG abundance (summed per sample) ----
+ab <- do.call(rbind, lapply(covs, function(f) {
+  s <- sub("_coverage.tsv", "", basename(f))
+  d <- tryCatch(read.delim(f, check.names = FALSE), error = function(e) NULL)
+  if (is.null(d) || nrow(d) == 0) return(NULL)
+  data.frame(sample = s,
+             mag_abundance_sum = sum(suppressWarnings(as.numeric(d[[2]])), na.rm = TRUE),
+             stringsAsFactors = FALSE)
+}))
+if (is.null(ab)) ab <- data.frame(sample = character(0), mag_abundance_sum = numeric(0))
+
+# ---- metal-gene counts per sample ----
+# hits files are per MAG; map each MAG back to its sample (MAG id starts with
+# the sample name for new MAGs: "<sample>_new_*"). Count metal genes per sample.
+mg <- do.call(rbind, lapply(hits, function(f) {
+  mag <- sub("_metal_hits.tsv", "", basename(f))
+  samp <- sub("_new.*$", "", mag)        # "<sample>_new" -> "<sample>"
+  d <- tryCatch(read.delim(f, check.names = FALSE), error = function(e) NULL)
+  if (is.null(d) || nrow(d) == 0) return(NULL)
+  tab <- as.data.frame(table(d$metal_gene), stringsAsFactors = FALSE)
+  if (nrow(tab) == 0) return(NULL)
+  names(tab) <- c("metal_gene", "count")
+  tab$sample <- samp
+  tab
+}))
+
+# pivot metal genes to wide: one column per metal gene, per sample
+metal_wide <- NULL
+if (!is.null(mg) && nrow(mg) > 0) {
+  agg <- aggregate(count ~ sample + metal_gene, data = mg, FUN = sum)
+  metal_wide <- reshape(agg, idvar = "sample", timevar = "metal_gene",
+                        direction = "wide")
+  names(metal_wide) <- sub("^count\\.", "metal_", names(metal_wide))
+}
+
+# ---- assemble: abundance + metal genes + geochemistry (left joins on sample) ----
+out <- ab
+if (!is.null(metal_wide)) out <- merge(out, metal_wide, by = "sample", all.x = TRUE)
+if (nrow(geo) > 0)        out <- merge(out, geo,        by = "sample", all.x = TRUE)
+
+# NA -> 0 for metal-gene count columns (absence = zero)
+metal_cols <- grep("^metal_", names(out), value = TRUE)
+for (c in metal_cols) out[[c]][is.na(out[[c]])] <- 0
+
+write.table(out, out_f, sep = "\t", row.names = FALSE, quote = FALSE)
+cat(sprintf("[merge] %d samples x %d columns (abundance + %d metal genes + geochem) -> %s\n",
+            nrow(out), ncol(out), length(metal_cols), out_f))

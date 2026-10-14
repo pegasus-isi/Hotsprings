@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# dram  MAG_FASTA  OUT_ANNOT   — KO annotation via KOfam (lightweight, ~5GB db)
+# Named "dram" to keep the workflow wiring; actually runs KOfam (kofamscan) to
+# emit KEGG KO numbers that match metal_genes.ref. KOfam DB is on CFS.
+set -euo pipefail
+MG="$(readlink -f "$1")"; OUT="$2"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+CORES="${PEGASUS_CORES:-16}"
+KODB="${MAG_KOFAM_DB:-/global/cfs/cdirs/m4144/hsafri/refs/kofam_db}"   # ko_list + profiles/
+
+# 1. predict genes with prodigal if the MAGs are nucleotide sequences
+if grep -qE '^[ACGTNacgtn]+$' <(grep -v '^>' "$MG" | head -1); then
+  prodigal -i "$MG" -a "$W/genes.faa" -p meta -q
+  FAA="$W/genes.faa"
+else
+  FAA="$MG"            # already amino-acid
+fi
+
+# 2. KOfam annotation. kofamscan's exec_annotation takes the profiles DIRECTORY
+#    and the ko_list file. Output is a detail-tsv with the KO per gene.
+if command -v exec_annotation >/dev/null 2>&1; then
+  exec_annotation -o "$OUT" -f detail-tsv \
+    -p "$KODB/profiles" -k "$KODB/ko_list" --cpu "$CORES" "$FAA"
+else
+  # fallback: run hmmsearch against the concatenated profiles if a single HMM
+  # db exists; otherwise concatenate the profiles directory once.
+  HMM="$KODB/profiles.hmm"
+  if [ ! -s "$HMM" ]; then
+    cat "$KODB"/profiles/*.hmm > "$W/all.hmm" 2>/dev/null && HMM="$W/all.hmm"
+  fi
+  hmmsearch --cpu "$CORES" --tblout "$W/hits.tbl" "$HMM" "$FAA" >/dev/null 2>&1 || true
+  { echo -e "gene\tko"; awk '!/^#/{print $1"\t"$3}' "$W/hits.tbl" 2>/dev/null; } > "$OUT"
+fi
+echo "[dram/kofam] wrote KO annotations -> $OUT"

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# refine CONTIGS SEMIBIN.tar COMEBIN.tar VAMB.tar OUT_MAGS  — DAS Tool consolidation
+set -euo pipefail
+C="$(readlink -f "$1")"; SB="$(readlink -f "$2")"; CB="$(readlink -f "$3")"; VB="$(readlink -f "$4")"; OUT="$5"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+for t in "$SB:semibin" "$CB:comebin" "$VB:vamb"; do
+  f="${t%%:*}"; n="${t##*:}"; mkdir -p "$W/$n"; tar -xf "$f" -C "$W/$n" 2>/dev/null || true
+done
+# build DAS Tool contig->bin tables from each binner's fasta bins
+command -v Fasta_to_Contig2Bin.sh >/dev/null 2>&1 && FTO=Fasta_to_Contig2Bin.sh || FTO=Fasta_to_Scaffolds2Bin.sh
+TABS=""
+for n in semibin comebin vamb; do
+  bd=$(find "$W/$n" -type d -name "*bins*" | head -1); [ -z "$bd" ] && bd="$W/$n"
+  ls "$bd"/*.fa >/dev/null 2>&1 && EXT=fa || EXT=fasta
+  $FTO -i "$bd" -e "$EXT" > "$W/$n.tsv" 2>/dev/null && TABS="$TABS,$W/$n.tsv" || true
+done
+TABS="${TABS#,}"
+if [ -n "$TABS" ]; then
+  DAS_Tool -i "$TABS" -l semibin,comebin,vamb -c "$C" -o "$W/das" \
+    --threads "${PEGASUS_CORES:-16}" --write_bins 2>/dev/null || true
+fi
+# concat refined MAGs into one fasta with bin-id headers
+python3 - "$W" "$OUT" <<'PY'
+import sys,glob,os
+w,out=sys.argv[1:3]
+bins=glob.glob(os.path.join(w,"das_DASTool_bins","*.fa"))+glob.glob(os.path.join(w,"das_DASTool_bins","*.fasta"))
+if not bins:  # fallback: take semibin bins
+    bins=glob.glob(os.path.join(w,"semibin","**","*.fa"),recursive=True)
+with open(out,"w") as fo:
+    for f in bins:
+        b=os.path.splitext(os.path.basename(f))[0]
+        for line in open(f):
+            fo.write((">"+b+"__"+line[1:]) if line.startswith(">") else line)
+print(f"[refine] {len(bins)} MAGs -> {out}")
+PY
+echo "[refine] -> $OUT"
