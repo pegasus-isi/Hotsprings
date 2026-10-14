@@ -25,9 +25,11 @@ BIN  = ROOT / "bin"
 DATA = ROOT / "data"
 MAGS = DATA / "mags"
 REF  = DATA / "reference"
+# metagenome reads folder (confirmed absolute path; override with MAG_READS_DIR)
 READS = Path(os.environ.get(
     "MAG_READS_DIR",
-    "/home/hsafri/hotSprings/PegasusWMS-SubductCR_16S-diversity/subductcr-final/data/metagenome"))
+    "/home/hsafri/hotSprings/PegasusWMS-SubductCR_16S-diversity/subductcr-final/data/metagenome",
+))
 
 # --- TEST: pick a few samples that have matching geochemistry ---
 TEST_SAMPLES = os.environ.get("MAG_TEST_SAMPLES", "CYF SLS TCF").split()

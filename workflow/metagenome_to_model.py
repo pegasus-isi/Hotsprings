@@ -44,6 +44,7 @@ MAGS = DATA / "mags"
 REF  = DATA / "reference"
 
 # your real metagenome reads folder (baked in; override with MAG_READS_DIR)
+# metagenome reads folder (confirmed absolute path; override with MAG_READS_DIR)
 READS = Path(os.environ.get(
     "MAG_READS_DIR",
     "/home/hsafri/hotSprings/PegasusWMS-SubductCR_16S-diversity/subductcr-final/data/metagenome",
