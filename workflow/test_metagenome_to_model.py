@@ -50,7 +50,7 @@ def make_containers():
 
 def make_transformations(ctr):
     # TEST: smaller memory, shorter runtime (12h), shared queue where possible
-    def T(name, container, mem_gb=16, cpus=8, gpus=0, runtime=43200, queue="shared"):
+    def T(name, container, mem_gb=16, cpus=8, gpus=0, runtime=43200, queue="regular"):
         t = Transformation(name, site="local", pfn=str(BIN / name),
                             is_stageable=True, container=container)
         t.add_profiles(Namespace.PEGASUS, key="memory",      value=str(mem_gb*1024))
@@ -68,16 +68,16 @@ def make_transformations(ctr):
     tents = {
         "subsample":    T("subsample",   ctr["qc"],       mem_gb=8,  cpus=4),
         "qc_trim":      T("qc_trim",      ctr["qc"],       mem_gb=8,  cpus=8),
-        "assembly":     T("assembly",     ctr["assembly"], mem_gb=32, cpus=16),
-        "read_map":     T("read_map",     ctr["map"],      mem_gb=16, cpus=8),
+        "assembly":     T("assembly",     ctr["assembly"], mem_gb=32, cpus=16, queue="regular"),
+        "read_map":     T("read_map",     ctr["map"],      mem_gb=16, cpus=8, queue="regular"),
         "bin_semibin":  T("bin_semibin",  ctr["semibin"],  mem_gb=32, cpus=8, gpus=1, queue="regular"),
         "bin_comebin":  T("bin_comebin",  ctr["comebin"],  mem_gb=32, cpus=8, gpus=1, queue="regular"),
         "bin_vamb":     T("bin_vamb",     ctr["vamb"],     mem_gb=32, cpus=8, gpus=1, queue="regular"),
-        "refine":       T("refine",       ctr["refine"],   mem_gb=16, cpus=8),
-        "dram":         T("dram",         ctr["dram"],     mem_gb=16, cpus=8),
+        "refine":       T("refine",       ctr["refine"],   mem_gb=16, cpus=8, queue="regular"),
+        "dram":         T("dram",         ctr["dram"],     mem_gb=16, cpus=8, queue="regular"),
         "mmseqs_func":  T("mmseqs_func",  ctr["mmseqs"],   mem_gb=24, cpus=8, gpus=1, queue="regular"),
-        "mmseqs_metal": T("mmseqs_metal", ctr["mmseqs"],   mem_gb=16, cpus=8),
-        "abundance":    T("abundance",    ctr["coverm"],   mem_gb=16, cpus=8),
+        "mmseqs_metal": T("mmseqs_metal", ctr["mmseqs"],   mem_gb=16, cpus=8, queue="regular"),
+        "abundance":    T("abundance",    ctr["coverm"],   mem_gb=16, cpus=8, queue="regular"),
         "merge":        T("merge",        ctr["r"],        mem_gb=8,  cpus=2),
         "predict":      T("predict",      ctr["r"],        mem_gb=8,  cpus=2),
     }
@@ -188,6 +188,11 @@ def make_properties():
     p = Properties()
     p["dagman.retry"] = "2"
     p["pegasus.integrity.checking"] = "none"
+    # containers lack curl/wget — don't re-download the worker package inside
+    # them; use the one already staged. Fixes "Unable to find curl/wget".
+    p["pegasus.transfer.worker.package"] = "true"
+    p["pegasus.transfer.worker.package.autodownload"] = "false"
+    p["pegasus.transfer.worker.package.strict"] = "false"
     p["dagman.maxjobs"] = "10"
     p["dagman.maxidle"] = "20"
     return p

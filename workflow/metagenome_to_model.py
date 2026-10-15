@@ -99,7 +99,7 @@ def make_transformations(ctr):
     tc = TransformationCatalog()
     tents = {
         # ---- Path A: raw reads -> MAGs ----
-        "qc_trim":      T("qc_trim",      ctr["qc"],       mem_gb=16,  cpus=16, queue="shared"),
+        "qc_trim":      T("qc_trim",      ctr["qc"],       mem_gb=16,  cpus=16, queue="regular"),
         "assembly":     T("assembly",     ctr["assembly"], mem_gb=120, cpus=64),              # MEGAHIT (CPU)
         "read_map":     T("read_map",     ctr["map"],      mem_gb=32,  cpus=16),              # Bowtie2 (CPU)
         "bin_semibin":  T("bin_semibin",  ctr["semibin"],  mem_gb=64,  cpus=16, gpus=1),      # GPU
@@ -113,7 +113,7 @@ def make_transformations(ctr):
         # ---- Abundance ----
         "abundance":    T("abundance",    ctr["coverm"],   mem_gb=32,  cpus=16),              # CoverM (CPU)
         # ---- Integrate + predict ----
-        "merge":        T("merge",        ctr["r"],        mem_gb=16,  cpus=4, queue="shared"),
+        "merge":        T("merge",        ctr["r"],        mem_gb=16,  cpus=4, queue="regular"),
         "predict":      T("predict",      ctr["r"],        mem_gb=32,  cpus=8, gpus=1),       # GPU if DL
     }
     tc.add_transformations(*tents.values())
@@ -272,6 +272,11 @@ def make_properties():
     p = Properties()
     p["dagman.retry"] = "3"
     p["pegasus.integrity.checking"] = "none"
+    # containers lack curl/wget — don't re-download the worker package inside
+    # them; use the one already staged. Fixes "Unable to find curl/wget".
+    p["pegasus.transfer.worker.package"] = "true"
+    p["pegasus.transfer.worker.package.autodownload"] = "false"
+    p["pegasus.transfer.worker.package.strict"] = "false"
     p["dagman.maxjobs"] = os.environ.get("MAG_MAXJOBS", "20")
     p["dagman.maxidle"] = "40"
     if os.environ.get("MAG_USE_SHIFTER", "1") != "1":
