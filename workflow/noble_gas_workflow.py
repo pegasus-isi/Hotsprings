@@ -10,7 +10,7 @@ ONE output : GAS_PROCESS_reproduced.xlsx (a single workbook with all tabs)
 from pathlib import Path
 from Pegasus.api import (
     Workflow, Job, File, Transformation,
-    ReplicaCatalog, TransformationCatalog, Properties,
+    ReplicaCatalog, TransformationCatalog, Properties, Container,
 )
 
 BASE = Path(__file__).parent.resolve()
@@ -29,6 +29,10 @@ rc.add_replica("local", workbook, (INPUT / "GAS_PROCESS.xlsx").as_uri())
 
 # 3. transformation catalog -- one executable per job (+ the shared library)
 tc = TransformationCatalog()
+cont = Container("noble-gas", Container.SINGULARITY,
+                 image=(BASE.parent / "docker" / "noble-gas.sif").as_uri(),
+                 image_site="local")
+tc.add_containers(cont)
 gaslib = File("gaslib.py")
 rc.add_replica("local", gaslib, (BIN / "gaslib.py").as_uri())   # staged beside each job
 
@@ -37,7 +41,7 @@ STEPS = ["build_semiraw", "compute_references",
 xf = {}
 for step in STEPS:
     t = Transformation(step, site="local", pfn=(BIN / f"{step}.py").as_uri(),
-                       is_stageable=True)
+                       is_stageable=True, container=cont)
     xf[step] = t
     tc.add_transformations(t)
 
