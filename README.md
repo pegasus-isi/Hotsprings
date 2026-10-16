@@ -109,3 +109,8 @@ The image is not committed (*.sif is gitignored), so it must be built on the mac
 Notes:
 - plan.sh plans and submits. Don't run it twice back to back, since every run writes to the same output path.
 - The image includes curl, which PegasusLite needs to download its worker package.
+- run0005 (25/25 jobs succeeded) ran its jobs inside the container built from the
+current image. Its output, GAS_PROCESS_reproduced.xlsx, has the same cell values as the
+initial no-container run0001 (formatting not compared).
+
+Notes: build docker/noble-gas.sif locally before planning (the .sif is gitignored)
