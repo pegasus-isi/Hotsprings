@@ -8,7 +8,6 @@ python3 noble_gas_workflow.py                 # -> noble-gas-reduction.yml + peg
 pegasus-plan \
     --conf pegasus.properties \
     --sites local \
-    --sites-catalog sites.yml \
     --output-sites local \
     --dir work \
     --submit \

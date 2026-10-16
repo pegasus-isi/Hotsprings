@@ -92,3 +92,20 @@ python src/noble_gas_reducer.py \
 - `Samples`: reproduces concentration columns and simple ratio columns.
 
 All other workbook sheets and cells are copied through from the source workbook.
+
+## Running in a container (Apptainer)
+
+The workflow can run each job inside an Apptainer image, so the Python environment is fixed
+(Python 3.11.17, openpyxl 3.1.3, et_xmlfile 2.0.0).
+
+Build the image from the docker/ folder before planning:
+
+    cd docker
+    apptainer build noble-gas.sif noble-gas.def
+
+noble_gas_workflow.py attaches the image to every job through a file:// path to docker/noble-gas.sif.
+The image is not committed (*.sif is gitignored), so it must be built on the machine that plans the workflow.
+
+Notes:
+- plan.sh plans and submits. Don't run it twice back to back, since every run writes to the same output path.
+- The image includes curl, which PegasusLite needs to download its worker package.

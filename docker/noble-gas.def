@@ -1,0 +1,21 @@
+
+Bootstrap: docker
+
+From: python:3.11.17-slim
+
+
+
+%files
+
+    requirements.txt /opt/requirements.txt
+
+
+
+%post
+
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir -r /opt/requirements.txt
+

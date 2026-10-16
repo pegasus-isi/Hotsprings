@@ -9,3 +9,8 @@ venv/
 outputs/*.xlsx
 !outputs/oct_tabs_generated.xlsx
 outputs/tabs__*.xlsx
+*.sif
+*.bak
+workflow/work/
+workflow/output/*.csv
+workflow/output/*.json
