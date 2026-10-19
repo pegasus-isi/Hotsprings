@@ -1,10 +1,27 @@
 #!/usr/bin/env bash
 # subsample  R1  R2  OUT_R1  OUT_R2   — keep the first N read pairs (fast test)
-set -euo pipefail
+# Uses seqtk if available (clean); else a SIGPIPE-safe zcat|head.
+set -uo pipefail          # NOTE: no -e, so a SIGPIPE in a pipe won't kill the script
 R1="$(readlink -f "$1")"; R2="$(readlink -f "$2")"; O1="$3"; O2="$4"
-N="${MAG_SUBSAMPLE:-5000000}"          # read pairs to keep
-LINES=$((N * 4))                      # 4 lines per read
+N="${MAG_SUBSAMPLE:-5000000}"
 echo "[subsample] keeping first $N read pairs"
-zcat "$R1" | head -n "$LINES" | gzip > "$O1"
-zcat "$R2" | head -n "$LINES" | gzip > "$O2"
+
+take() {
+  # $1 = input fastq.gz, $2 = output fastq.gz
+  local in="$1" out="$2"
+  if command -v seqtk >/dev/null 2>&1; then
+    seqtk sample -s100 "$in" "$N" | gzip > "$out"
+  else
+    # SIGPIPE-safe: run the pipe in a subshell, ignore 141 from head closing it
+    { zcat "$in" 2>/dev/null | head -n $((N*4)) || true; } | gzip > "$out"
+  fi
+}
+
+take "$R1" "$O1"
+take "$R2" "$O2"
+
+# sanity: outputs must be non-empty
+for f in "$O1" "$O2"; do
+  if [ ! -s "$f" ]; then echo "[subsample] ERROR: $f is empty"; exit 1; fi
+done
 echo "[subsample] wrote $O1 + $O2"
