@@ -33,7 +33,7 @@ READS = Path(os.environ.get(
 
 # --- TEST: pick a few samples that have matching geochemistry ---
 TEST_SAMPLES = os.environ.get("MAG_TEST_SAMPLES", "CYF SLS TCF").split()
-SUBSAMPLE = os.environ.get("MAG_SUBSAMPLE", "500000")   # read pairs to keep
+SUBSAMPLE = os.environ.get("MAG_SUBSAMPLE", "5000000")   # read pairs to keep
 
 
 def make_containers():
@@ -48,6 +48,10 @@ def make_containers():
     return {n: c(f"mag-{n}", f"{user}/mag-{n}:{tag}") for n in names}
 
 
+# GPU toggle: MAG_GPU=1 (default) uses GPU nodes for the DL/MMseqs jobs;
+# MAG_GPU=0 runs everything on CPU (slower, but no GPU containers/queues needed).
+USE_GPU = os.environ.get("MAG_GPU", "1") == "1"
+
 def make_transformations(ctr):
     # TEST: smaller memory, shorter runtime (12h), shared queue where possible
     def T(name, container, mem_gb=16, cpus=8, gpus=0, runtime=43200, queue="regular"):
@@ -58,7 +62,7 @@ def make_transformations(ctr):
         t.add_profiles(Namespace.PEGASUS, key="runtime",     value=str(runtime))
         t.add_profiles(Namespace.PEGASUS, key="maxwalltime", value=str(runtime//60))
         t.add_profiles(Namespace.PEGASUS, key="queue",       value=queue)
-        if gpus:
+        if gpus and USE_GPU:
             t.add_profiles(Namespace.PEGASUS, key="gpus", value=str(gpus))
             t.add_profiles(Namespace.PEGASUS, key="glite.arguments", value="-C gpu")
         else:
@@ -76,7 +80,7 @@ def make_transformations(ctr):
         "refine":       T("refine",       ctr["refine"],   mem_gb=16, cpus=8, queue="regular"),
         "dram":         T("dram",         ctr["dram"],     mem_gb=16, cpus=8, queue="regular"),
         "mmseqs_func":  T("mmseqs_func",  ctr["mmseqs"],   mem_gb=24, cpus=8, gpus=1, queue="regular"),
-        "mmseqs_metal": T("mmseqs_metal", ctr["mmseqs"],   mem_gb=16, cpus=8, queue="regular"),
+        "mmseqs_metal": T("mmseqs_metal", ctr["mmseqs"],   mem_gb=16, cpus=4, queue="regular"),
         "abundance":    T("abundance",    ctr["coverm"],   mem_gb=16, cpus=8, queue="regular"),
         "merge":        T("merge",        ctr["r"],        mem_gb=8,  cpus=2),
         "predict":      T("predict",      ctr["r"],        mem_gb=8,  cpus=2),

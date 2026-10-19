@@ -79,6 +79,10 @@ def make_containers():
 # --------------------------------------------------------------------------
 # transformations  (bin/ scripts -> Pegasus jobs; GPU jobs -> GPU nodes)
 # --------------------------------------------------------------------------
+# GPU toggle: MAG_GPU=1 (default) uses GPU nodes for the DL/MMseqs jobs;
+# MAG_GPU=0 runs everything on CPU (slower, but no GPU containers/queues needed).
+USE_GPU = os.environ.get("MAG_GPU", "1") == "1"
+
 def make_transformations(ctr):
     def T(name, container, mem_gb=32, cpus=16, gpus=0, runtime=86400, queue="regular"):
         t = Transformation(name, site="local",
@@ -89,7 +93,7 @@ def make_transformations(ctr):
         t.add_profiles(Namespace.PEGASUS, key="runtime",     value=str(runtime))
         t.add_profiles(Namespace.PEGASUS, key="maxwalltime", value=str(runtime // 60))
         t.add_profiles(Namespace.PEGASUS, key="queue",       value=queue)
-        if gpus:
+        if gpus and USE_GPU:
             t.add_profiles(Namespace.PEGASUS, key="gpus", value=str(gpus))
             t.add_profiles(Namespace.PEGASUS, key="glite.arguments", value="-C gpu")
         else:
@@ -109,12 +113,12 @@ def make_transformations(ctr):
         # ---- Annotation ----
         "dram":         T("dram",         ctr["dram"],     mem_gb=64,  cpus=16),              # DRAM (CPU)
         "mmseqs_func":  T("mmseqs_func",  ctr["mmseqs"],   mem_gb=48,  cpus=16, gpus=1),      # GPU
-        "mmseqs_metal": T("mmseqs_metal", ctr["mmseqs"],   mem_gb=48,  cpus=16, gpus=1),      # GPU
+        "mmseqs_metal": T("mmseqs_metal", ctr["mmseqs"],   mem_gb=16,  cpus=4),               # CPU (KO match)
         # ---- Abundance ----
         "abundance":    T("abundance",    ctr["coverm"],   mem_gb=32,  cpus=16),              # CoverM (CPU)
         # ---- Integrate + predict ----
         "merge":        T("merge",        ctr["r"],        mem_gb=16,  cpus=4, queue="regular"),
-        "predict":      T("predict",      ctr["r"],        mem_gb=32,  cpus=8, gpus=1),       # GPU if DL
+        "predict":      T("predict",      ctr["r"],        mem_gb=16,  cpus=4),               # CPU (R model)
     }
     tc.add_transformations(*tents.values())
 

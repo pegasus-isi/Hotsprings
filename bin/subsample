@@ -2,10 +2,9 @@
 # subsample  R1  R2  OUT_R1  OUT_R2   — keep the first N read pairs (fast test)
 set -euo pipefail
 R1="$(readlink -f "$1")"; R2="$(readlink -f "$2")"; O1="$3"; O2="$4"
-N="${MAG_SUBSAMPLE:-500000}"          # read pairs to keep
+N="${MAG_SUBSAMPLE:-5000000}"          # read pairs to keep
 LINES=$((N * 4))                      # 4 lines per read
 echo "[subsample] keeping first $N read pairs"
-# head closes the pipe after N lines → SIGPIPE on zcat; || true absorbs the broken-pipe exit
-{ zcat "$R1" || true; } | head -n "$LINES" | gzip > "$O1"
-{ zcat "$R2" || true; } | head -n "$LINES" | gzip > "$O2"
+zcat "$R1" | head -n "$LINES" | gzip > "$O1"
+zcat "$R2" | head -n "$LINES" | gzip > "$O2"
 echo "[subsample] wrote $O1 + $O2"
