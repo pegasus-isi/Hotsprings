@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # mmseqs_func  MAGS  OUT_FUNC   — MMseqs2 functional search vs UniRef50 (GPU)
 set -euo pipefail
+GPUFLAG=""; [ "${MAG_GPU:-1}" = "1" ] && GPUFLAG="--gpu 1"
 MG="$(readlink -f "$1")"; OUT="$2"; W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+if [ ! -s "$MG" ] || ! grep -q "^>" "$MG" 2>/dev/null; then echo "[mmseqs_func] MAGs empty — empty output"; printf "query\ttarget\tevalue\tbits\tpident\n" > "$OUT"; exit 0; fi
 DB="${MAG_FUNC_DB:-/global/cfs/cdirs/m4144/hsafri/refs/mmseqs/uniref50}"
 CORES="${PEGASUS_CORES:-16}"
-mmseqs easy-search "$MG" "$DB" "$OUT" "$W/tmp" --threads "$CORES" ${MAG_GPU:+--gpu 1} \
+mmseqs easy-search "$MG" "$DB" "$OUT" "$W/tmp" --threads "$CORES" $GPUFLAG \
   --format-output "query,target,evalue,bits,pident" 2>/dev/null || \
   mmseqs easy-search "$MG" "$DB" "$OUT" "$W/tmp" --threads "$CORES" \
   --format-output "query,target,evalue,bits,pident"

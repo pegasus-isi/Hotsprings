@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
-# abundance MAGS R1 R2 OUT_COV  — CoverM per-sample MAG abundance
-set -euo pipefail
+# abundance  MAGS  R1  R2  OUT_COV   — CoverM per-sample MAG abundance
+# Handles empty MAGs (no bins produced) by writing an empty coverage file
+# instead of crashing, so the DAG continues.
+set -uo pipefail
 MG="$(readlink -f "$1")"; R1="$(readlink -f "$2")"; R2="$(readlink -f "$3")"; OUT="$4"
+
+# guard: if the MAGs fasta is empty / has no sequences, skip mapping
+if [ ! -s "$MG" ] || ! grep -q "^>" "$MG" 2>/dev/null; then
+  echo "[abundance] WARNING: MAGs file empty (no bins) — writing empty coverage"
+  printf "contig\tmean\n" > "$OUT"
+  echo "[abundance] wrote empty $OUT — DAG continues"
+  exit 0
+fi
+
 coverm contig --coupled "$R1" "$R2" --reference "$MG" --methods mean \
-  --threads "${PEGASUS_CORES:-16}" > "$OUT"
+  --threads "${PEGASUS_CORES:-16}" > "$OUT" || {
+    echo "[abundance] CoverM failed — writing empty coverage"
+    printf "contig\tmean\n" > "$OUT"
+  }
 echo "[abundance] -> $OUT"
