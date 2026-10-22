@@ -43,29 +43,57 @@ DATA = ROOT / "data"
 MAGS = DATA / "mags"
 REF  = DATA / "reference"
 
-# your real metagenome reads folder (baked in; override with MAG_READS_DIR)
-# metagenome reads folder (confirmed absolute path; override with MAG_READS_DIR)
-READS = Path(os.environ.get(
-    "MAG_READS_DIR",
-    "/home/hsafri/hotSprings/PegasusWMS-SubductCR_16S-diversity/subductcr-final/data/metagenome",
-))
+# READS is set from the site config after SITE is loaded (see below)
 
+
+# --------------------------------------------------------------------------
+# site profile  (nersc = Perlmutter/Shifter/SFAPI ; usc = CARC/Apptainer/Slurm)
+# --------------------------------------------------------------------------
+SITE_PROFILE = os.environ.get("MAG_SITE_PROFILE", "nersc").lower()
+
+def _load_sites():
+    """Read config/sites.yaml (a minimal parser — no external deps)."""
+    cfg = ROOT / "config" / "workflow_sites.conf"
+    sites, cur = {}, None
+    if cfg.exists():
+        for raw in cfg.read_text().splitlines():
+            line = raw.rstrip()
+            if not line.strip() or line.strip().startswith("#"):
+                continue
+            if not line.startswith(" "):                      # top-level site name
+                cur = line.rstrip(":").strip(); sites[cur] = {}
+            elif cur and ":" in line:                          # key: value
+                k, v = line.strip().split(":", 1)
+                sites[cur][k.strip()] = v.strip().strip('"').strip("'")
+    return sites
+
+_SITE = _load_sites()
+# fallback defaults if the config is missing
+if not _SITE:
+    _SITE = {"nersc": {"runtime":"shifter","cpu_queue":"regular","gpu_queue":"regular",
+                       "gpu_arg":"-C gpu","cpu_arg":"-C cpu","exec_site":"compute"}}
+SITE = _SITE.get(SITE_PROFILE, next(iter(_SITE.values())))
+
+# data + database paths from the site config (env vars override)
+READS   = Path(os.environ.get("MAG_READS_DIR", SITE.get("reads_dir", str(DATA/"metagenome"))))
+KOFAMDB = os.environ.get("MAG_KOFAM_DB", SITE.get("kofam_db", ""))
+FUNCDB  = os.environ.get("MAG_FUNC_DB",  SITE.get("func_db", ""))
+REFDIR  = os.environ.get("MAG_REF_DIR",  SITE.get("reference", str(DATA/"reference")))
 
 # --------------------------------------------------------------------------
 # containers  (one image per tool family)
 # --------------------------------------------------------------------------
 def make_containers():
     """Return the tool containers. Shifter is the default backend."""
-    shifter = os.environ.get("MAG_USE_SHIFTER", "1") == "1"
-    sif     = os.environ.get("MAG_USE_SIF", "0") == "1"
-    user    = os.environ.get("MAG_DOCKER_USER", "swarmourr")
-    tag     = os.environ.get("MAG_TAG", "latest")
+    user = os.environ.get("MAG_DOCKER_USER", "swarmourr")
+    tag  = os.environ.get("MAG_TAG", "latest")
+    runtime = SITE["runtime"]
 
     def container(name, image):
-        if shifter:
+        if runtime == "shifter":                      # NERSC
             return Container(name, Container.SHIFTER,
                              image=f"shifter:///{image}", bypass_staging=True)
-        if sif:
+        if runtime == "singularity":                  # USC CARC (Apptainer)
             path = ROOT / "containers" / "sif" / f"{name}.sif"
             return Container(name, Container.SINGULARITY,
                              image=f"file://{path}", image_site="local")
@@ -84,7 +112,7 @@ def make_containers():
 USE_GPU = os.environ.get("MAG_GPU", "1") == "1"
 
 def make_transformations(ctr):
-    def T(name, container, mem_gb=32, cpus=16, gpus=0, runtime=86400, queue="regular"):
+    def T(name, container, mem_gb=32, cpus=16, gpus=0, runtime=86400, queue=None):
         t = Transformation(name, site="local",
                             pfn=str(BIN / name), is_stageable=True,
                             container=container)
@@ -92,18 +120,26 @@ def make_transformations(ctr):
         t.add_profiles(Namespace.PEGASUS, key="cores",       value=str(cpus))
         t.add_profiles(Namespace.PEGASUS, key="runtime",     value=str(runtime))
         t.add_profiles(Namespace.PEGASUS, key="maxwalltime", value=str(runtime // 60))
-        t.add_profiles(Namespace.PEGASUS, key="queue",       value=queue)
-        if gpus and USE_GPU:
+        # pass the site's DB paths to every job (wrappers read these)
+        if KOFAMDB: t.add_profiles(Namespace.ENV, key="MAG_KOFAM_DB", value=KOFAMDB)
+        if FUNCDB:  t.add_profiles(Namespace.ENV, key="MAG_FUNC_DB",  value=FUNCDB)
+        want_gpu = bool(gpus) and USE_GPU
+        # queue + scheduler args come from the active SITE profile
+        q = (SITE["gpu_queue"] if want_gpu else SITE["cpu_queue"])
+        t.add_profiles(Namespace.PEGASUS, key="queue", value=q)
+        if want_gpu:
             t.add_profiles(Namespace.PEGASUS, key="gpus", value=str(gpus))
-            t.add_profiles(Namespace.PEGASUS, key="glite.arguments", value="-C gpu")
+            if SITE["gpu_arg"]:
+                t.add_profiles(Namespace.PEGASUS, key="glite.arguments", value=SITE["gpu_arg"])
         else:
-            t.add_profiles(Namespace.PEGASUS, key="glite.arguments", value="-C cpu")
+            if SITE["cpu_arg"]:
+                t.add_profiles(Namespace.PEGASUS, key="glite.arguments", value=SITE["cpu_arg"])
         return t
 
     tc = TransformationCatalog()
     tents = {
         # ---- Path A: raw reads -> MAGs ----
-        "qc_trim":      T("qc_trim",      ctr["qc"],       mem_gb=16,  cpus=16, queue="regular"),
+        "qc_trim":      T("qc_trim",      ctr["qc"],       mem_gb=16,  cpus=16),
         "assembly":     T("assembly",     ctr["assembly"], mem_gb=120, cpus=64),              # MEGAHIT (CPU)
         "read_map":     T("read_map",     ctr["map"],      mem_gb=32,  cpus=16),              # Bowtie2 (CPU)
         "bin_semibin":  T("bin_semibin",  ctr["semibin"],  mem_gb=64,  cpus=16, gpus=1),      # GPU
@@ -117,7 +153,7 @@ def make_transformations(ctr):
         # ---- Abundance ----
         "abundance":    T("abundance",    ctr["coverm"],   mem_gb=32,  cpus=16),              # CoverM (CPU)
         # ---- Integrate + predict ----
-        "merge":        T("merge",        ctr["r"],        mem_gb=16,  cpus=4, queue="regular"),
+        "merge":        T("merge",        ctr["r"],        mem_gb=16,  cpus=4),
         "predict":      T("predict",      ctr["r"],        mem_gb=16,  cpus=4),               # CPU (R model)
     }
     tc.add_transformations(*tents.values())
@@ -328,7 +364,22 @@ def main():
     ap = argparse.ArgumentParser(description="SubductCR Metagenome-to-Model workflow")
     ap.add_argument("--plan-only", action="store_true",
                     help="build and plan the DAG but do not submit")
+    ap.add_argument("--site", choices=["nersc", "usc", "slurm"], default=None,
+                    help="target HPC site profile (overrides MAG_SITE_PROFILE)")
+    ap.add_argument("--test", action="store_true",
+                    help="test mode: only the first 2 samples")
+    ap.add_argument("--cpu", action="store_true",
+                    help="CPU-only (disable GPU for all jobs)")
     args = ap.parse_args()
+
+    # apply command-line overrides before anything uses them
+    global SITE, METAGENOMES, USE_GPU
+    if args.site:
+        SITE = _SITE.get(args.site, _SITE["nersc"])
+    if args.cpu:
+        USE_GPU = False
+    if args.test:
+        METAGENOMES = METAGENOMES[:2]
 
     ctr          = make_containers()
     tc, T        = make_transformations(ctr)
@@ -341,15 +392,14 @@ def main():
     props.write()
 
     on_nersc  = os.environ.get("MAG_USE_SHIFTER", "1") == "1"
-    exec_site = os.environ.get("MAG_SITE", "compute" if on_nersc else "local")
+    exec_site = os.environ.get("MAG_SITE", SITE["exec_site"])
 
     print("SubductCR Metagenome-to-Model workflow")
-    print(f"  backend        : {'Shifter' if on_nersc else 'Docker/SIF'}")
-    print(f"  GPU            : {'ON' if os.environ.get('MAG_GPU')=='1' else 'OFF'}")
+    print(f"  site profile   : {SITE_PROFILE if not args.site else args.site}  (runtime={SITE['runtime']}, cpu_q={SITE['cpu_queue']}, gpu_q={SITE['gpu_queue']})")
+    print(f"  GPU            : {'ON' if USE_GPU else 'OFF'}")
+    print(f"  mode           : {'TEST (first 2 samples)' if args.test else 'FULL'}")
     print(f"  reads folder   : {READS}")
-    print(f"  Path A         : {len(METAGENOMES)} metagenomes")
-    print(f"  Path B         : {len(EXISTING_MAGS)} existing MAGs")
-    print(f"  GPU jobs       : SemiBin2, COMEBin, VAMB, MMseqs2 (func+metal), predict")
+    print(f"  samples        : {len(METAGENOMES)}")
     print(f"  execution site : {exec_site}")
 
     plan_kwargs = dict(submit=not args.plan_only, dir=str(ROOT / "runs"))
