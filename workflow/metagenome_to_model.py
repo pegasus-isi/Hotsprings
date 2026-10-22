@@ -229,9 +229,12 @@ def make_properties(cfg):
     p = Properties()
     p["dagman.retry"] = "3"
     p["pegasus.integrity.checking"] = "none"
-    p["pegasus.transfer.worker.package"] = "true"
-    p["pegasus.transfer.worker.package.autodownload"] = "false"
+    # worker package: NERSC containers lack curl (don't auto-download there);
+    # on Slurm/Laguna let it download (compute nodes can fetch it).
     p["pegasus.transfer.worker.package.strict"] = "false"
+    if cfg["runtime"] == "shifter":
+        p["pegasus.transfer.worker.package"] = "true"
+        p["pegasus.transfer.worker.package.autodownload"] = "false"
     p["dagman.maxjobs"] = os.environ.get("MAG_MAXJOBS", "20")
     p["dagman.maxidle"] = "40"
     return p
@@ -239,14 +242,16 @@ def make_properties(cfg):
 
 # ---- site catalog (built in-code, per site) --------------------------------
 def make_site_catalog(cfg):
-    """Build the Pegasus site catalog: a 'local' site + the execution site.
-    For a Slurm cluster (usc/slurm) the exec site uses glite so jobs route
-    through blahp to the Slurm partition (not the empty HTCondor pool)."""
+    """Build the Pegasus site catalog: local (submit host) + the execution
+    site. For a Slurm cluster the exec site uses the standard glite/Slurm
+    profile so HTCondor routes jobs through blahp to the Slurm partition."""
     sc = SiteCatalog()
     scratch = os.environ.get("MAG_SCRATCH", str(ROOT / "scratch"))
     outputs = str(ROOT / "outputs")
+    os.makedirs(scratch, exist_ok=True)
+    os.makedirs(outputs, exist_ok=True)
 
-    # local (submit host)
+    # ---- local: the submit host ----
     local = Site("local", arch=Arch.X86_64, os_type=OS.LINUX)
     local.add_directories(
         Directory(Directory.SHARED_SCRATCH, scratch)
@@ -255,23 +260,35 @@ def make_site_catalog(cfg):
             .add_file_servers(FileServer(f"file://{outputs}", Operation.ALL)))
     sc.add_sites(local)
 
+    # ---- execution site ----
     exec_name = cfg["exec_site"]
     site = Site(exec_name, arch=Arch.X86_64, os_type=OS.LINUX)
+    # the exec site shares the filesystem with local (same cluster)
     site.add_directories(
         Directory(Directory.SHARED_SCRATCH, scratch)
             .add_file_servers(FileServer(f"file://{scratch}", Operation.ALL)))
 
     if cfg["runtime"] == "shifter":
-        # NERSC: SLURM via glite with Shifter (SFAPI-style handled by env)
-        site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"], auxillary_local="true")
-        site.add_condor_profile(grid_resource="batch slurm")
-    elif cfg["runtime"] == "singularity":
-        # USC/Slurm: glite -> blahp -> Slurm partition
+        # NERSC Perlmutter: handled by the SubductCR setup (SFAPI) — keep simple
         site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"],
-                                 data_configuration="sharedfs", auxillary_local="true")
+                                 auxillary_local="true")
         site.add_condor_profile(grid_resource="batch slurm")
     else:
-        site.add_pegasus_profile(style="condor")
+        # Standard Slurm-via-glite site (USC/CARC and generic Slurm clusters).
+        # style=glite + grid_resource "batch slurm" makes HTCondor submit to
+        # Slurm through blahp. auxillary.local lets it use local wrapper files.
+        site.add_pegasus_profile(
+            style="glite",
+            queue=cfg["cpu_queue"],
+            auxillary_local="true",
+            data_configuration="sharedfs",
+            runtime="86400",
+        )
+        site.add_condor_profile(grid_resource="batch slurm")
+        # Slurm resource requirements passed through glite (project/account if any)
+        proj = os.environ.get("MAG_PROJECT", "")
+        if proj:
+            site.add_profiles(Namespace.PEGASUS, key="project", value=proj)
     sc.add_sites(site)
     return sc
 
