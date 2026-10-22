@@ -22,7 +22,7 @@ MAGS = DATA / "mags"
 
 # ---- site config (loaded from config/workflow_sites.conf) ------------------
 def load_sites():
-    cfg = ROOT / "config" / "workflow_sites.conf"
+    cfg = ROOT / "workflow_sites.conf"
     sites, cur = {}, None
     if cfg.exists():
         for raw in cfg.read_text().splitlines():
