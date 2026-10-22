@@ -263,12 +263,12 @@ def make_site_catalog(cfg):
 
     if cfg["runtime"] == "shifter":
         # NERSC: SLURM via glite with Shifter (SFAPI-style handled by env)
-        site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"])
+        site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"], auxillary_local="true")
         site.add_condor_profile(grid_resource="batch slurm")
     elif cfg["runtime"] == "singularity":
         # USC/Slurm: glite -> blahp -> Slurm partition
         site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"],
-                                 data_configuration="sharedfs")
+                                 data_configuration="sharedfs", auxillary_local="true")
         site.add_condor_profile(grid_resource="batch slurm")
     else:
         site.add_pegasus_profile(style="condor")
