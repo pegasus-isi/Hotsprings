@@ -12,7 +12,7 @@ Portable: one generator, any HPC site, all paths from config/workflow_sites.conf
 import os, glob, argparse
 from pathlib import Path
 from Pegasus.api import (Workflow, Job, File, Container, Transformation,
-    TransformationCatalog, ReplicaCatalog, Properties, Namespace)
+    TransformationCatalog, ReplicaCatalog, Properties, Namespace, SiteCatalog, Site, Directory, FileServer, Grid, Operation)
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN  = ROOT / "bin"
@@ -22,9 +22,19 @@ MAGS = DATA / "mags"
 
 # ---- site config (loaded from config/workflow_sites.conf) ------------------
 def load_sites():
-    cfg = ROOT / "workflow" / "config" / "workflow_sites.conf"
+    # look for the config in several likely places
+    here = Path(__file__).resolve().parent
+    candidates = [
+        Path(os.environ.get("MAG_SITES_CONF", "")) if os.environ.get("MAG_SITES_CONF") else None,
+        ROOT / "config" / "workflow_sites.conf",      # <root>/config/
+        here / "config" / "workflow_sites.conf",      # next to the script
+        here / "workflow_sites.conf",                 # same dir as script
+        Path.cwd() / "config" / "workflow_sites.conf",# cwd/config/
+        Path.cwd() / "workflow_sites.conf",           # cwd
+    ]
+    cfg = next((c for c in candidates if c and c.exists()), None)
     sites, cur = {}, None
-    if cfg.exists():
+    if cfg is not None:
         for raw in cfg.read_text().splitlines():
             line = raw.rstrip()
             if not line.strip() or line.strip().startswith("#"):
@@ -227,6 +237,45 @@ def make_properties(cfg):
     return p
 
 
+# ---- site catalog (built in-code, per site) --------------------------------
+def make_site_catalog(cfg):
+    """Build the Pegasus site catalog: a 'local' site + the execution site.
+    For a Slurm cluster (usc/slurm) the exec site uses glite so jobs route
+    through blahp to the Slurm partition (not the empty HTCondor pool)."""
+    sc = SiteCatalog()
+    scratch = os.environ.get("MAG_SCRATCH", str(ROOT / "scratch"))
+    outputs = str(ROOT / "outputs")
+
+    # local (submit host)
+    local = Site("local", arch="x86_64", os_type="linux")
+    local.add_directories(
+        Directory(Directory.SHARED_SCRATCH, scratch)
+            .add_file_servers(FileServer(f"file://{scratch}", Operation.ALL)),
+        Directory(Directory.LOCAL_STORAGE, outputs)
+            .add_file_servers(FileServer(f"file://{outputs}", Operation.ALL)))
+    sc.add_sites(local)
+
+    exec_name = cfg["exec_site"]
+    site = Site(exec_name, arch="x86_64", os_type="linux")
+    site.add_directories(
+        Directory(Directory.SHARED_SCRATCH, scratch)
+            .add_file_servers(FileServer(f"file://{scratch}", Operation.ALL)))
+
+    if cfg["runtime"] == "shifter":
+        # NERSC: SLURM via glite with Shifter (SFAPI-style handled by env)
+        site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"])
+        site.add_condor_profile(grid_resource="batch slurm")
+    elif cfg["runtime"] == "singularity":
+        # USC/Slurm: glite -> blahp -> Slurm partition
+        site.add_pegasus_profile(style="glite", queue=cfg["cpu_queue"],
+                                 data_configuration="sharedfs")
+        site.add_condor_profile(grid_resource="batch slurm")
+    else:
+        site.add_pegasus_profile(style="condor")
+    sc.add_sites(site)
+    return sc
+
+
 # ---- main ------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="SubductCR Metagenome-to-Model workflow")
@@ -243,7 +292,9 @@ def main():
     rc = make_replicas(cfg)
     props = make_properties(cfg)
     wf = build_workflow(T, cfg)
-    wf.add_transformation_catalog(tc); wf.add_replica_catalog(rc); props.write()
+    sc = make_site_catalog(cfg)
+    wf.add_transformation_catalog(tc); wf.add_replica_catalog(rc)
+    wf.add_site_catalog(sc); props.write()
 
     print("SubductCR Metagenome-to-Model workflow")
     print(f"  site       : {cfg['profile']}  (runtime={cfg['runtime']}, cpu_q={cfg['cpu_queue']}, gpu_q={cfg['gpu_queue']})")
