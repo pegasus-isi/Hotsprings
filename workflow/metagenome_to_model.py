@@ -75,10 +75,11 @@ if not _SITE:
 SITE = _SITE.get(SITE_PROFILE, next(iter(_SITE.values())))
 
 # data + database paths from the site config (env vars override)
-READS   = Path(os.environ.get("MAG_READS_DIR", SITE.get("reads_dir", str(DATA/"metagenome"))))
-KOFAMDB = os.environ.get("MAG_KOFAM_DB", SITE.get("kofam_db", ""))
-FUNCDB  = os.environ.get("MAG_FUNC_DB",  SITE.get("func_db", ""))
-REFDIR  = os.environ.get("MAG_REF_DIR",  SITE.get("reference", str(DATA/"reference")))
+READS   = Path(os.environ.get("MAG_READS_DIR", SITE.get("reads_dir", str(DATA/"metagenome")))).resolve()
+KOFAMDB = os.path.abspath(os.environ.get("MAG_KOFAM_DB", SITE.get("kofam_db", "")))  if (os.environ.get("MAG_KOFAM_DB") or SITE.get("kofam_db")) else ""
+FUNCDB  = os.path.abspath(os.environ.get("MAG_FUNC_DB",  SITE.get("func_db", "")))   if (os.environ.get("MAG_FUNC_DB")  or SITE.get("func_db"))  else ""
+REFDIR  = os.path.abspath(os.environ.get("MAG_REF_DIR",  SITE.get("reference", str(DATA/"reference"))))
+SIFDIR  = os.environ.get("MAG_SIF_DIR", SITE.get("sif_dir", "")) or str(ROOT/"containers"/"sif")
 
 # --------------------------------------------------------------------------
 # containers  (one image per tool family)
