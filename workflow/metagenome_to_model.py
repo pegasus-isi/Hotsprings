@@ -12,7 +12,7 @@ Portable: one generator, any HPC site, all paths from config/workflow_sites.conf
 import os, glob, argparse
 from pathlib import Path
 from Pegasus.api import (Workflow, Job, File, Container, Transformation,
-    TransformationCatalog, ReplicaCatalog, Properties, Namespace, SiteCatalog, Site, Directory, FileServer, Grid, Operation)
+    TransformationCatalog, ReplicaCatalog, Properties, Namespace, SiteCatalog, Site, Directory, FileServer, Operation, Arch, OS)
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN  = ROOT / "bin"
@@ -247,7 +247,7 @@ def make_site_catalog(cfg):
     outputs = str(ROOT / "outputs")
 
     # local (submit host)
-    local = Site("local", arch="x86_64", os_type="linux")
+    local = Site("local", arch=Arch.X86_64, os_type=OS.LINUX)
     local.add_directories(
         Directory(Directory.SHARED_SCRATCH, scratch)
             .add_file_servers(FileServer(f"file://{scratch}", Operation.ALL)),
@@ -256,7 +256,7 @@ def make_site_catalog(cfg):
     sc.add_sites(local)
 
     exec_name = cfg["exec_site"]
-    site = Site(exec_name, arch="x86_64", os_type="linux")
+    site = Site(exec_name, arch=Arch.X86_64, os_type=OS.LINUX)
     site.add_directories(
         Directory(Directory.SHARED_SCRATCH, scratch)
             .add_file_servers(FileServer(f"file://{scratch}", Operation.ALL)))
