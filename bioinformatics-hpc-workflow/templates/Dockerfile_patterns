@@ -1,0 +1,40 @@
+# ============================================================================
+# DOCKERFILE PATTERNS — container conventions proven on HPC.
+# ============================================================================
+
+# --- CPU tool (micromamba base) — build fine on a laptop -------------------
+# FROM mambaorg/micromamba:1.5.8
+# USER root
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     curl wget ca-certificates && rm -rf /var/lib/apt/lists/*   # PATTERN: curl/wget always
+# RUN micromamba install -y -n base -c bioconda -c conda-forge <tool> \
+#     && micromamba clean -a -y                                   # keep it lean
+# ENV PATH=/opt/conda/bin:$PATH
+
+# --- GPU tool (CUDA base) — BUILD ON THE CLUSTER, not a laptop -------------
+# FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     wget curl bzip2 ca-certificates && rm -rf /var/lib/apt/lists/*
+# RUN wget -qO- https://micro.mamba.pm/api/micromamba/linux-64/latest \
+#     | tar -xvj -C /usr/local bin/micromamba
+# ENV MAMBA_ROOT_PREFIX=/opt/conda
+# ENV CONDA_OVERRIDE_CUDA=12.1          # lets conda solve GPU on a non-GPU builder
+# RUN micromamba install -y -p /opt/conda -c pytorch -c nvidia -c bioconda \
+#     -c conda-forge <tool> "pytorch>=2.0" pytorch-cuda=12.1 && micromamba clean -a -y
+# ENV PATH=/opt/conda/bin:$PATH
+
+# WHY build GPU on the cluster:
+#  - a non-GPU host (a Mac) can't resolve GPU PyTorch (resolves to cpuonly)
+#  - huge CUDA images corrupt laptop Docker's virtual disk (I/O errors)
+#  - podman-hpc on the cluster builds native x86 with real CUDA, migrates to
+#    the runtime (Shifter/Apptainer) directly
+
+# --- the split build strategy ----------------------------------------------
+#  CPU containers  -> build on a laptop (small, fine)
+#  GPU containers  -> build on the cluster (podman-hpc build + migrate)
+#  ALWAYS: curl + wget in every image (worker package)
+#  ALWAYS: pin versions; micromamba clean -a -y
+
+# --- Apptainer conversion (for Slurm clusters) -----------------------------
+#  apptainer pull sif/<img>.sif docker://<ns>/<img>:<tag>
+#  GPU exec needs --nv
